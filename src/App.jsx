@@ -250,6 +250,9 @@ export default function App() {
   const [ritualExpanded, setRitualExpanded] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [historyMonth, setHistoryMonth] = useState(ymKey(todayISO()));
+  const [calendarMonth, setCalendarMonth] = useState(ymKey(todayISO()));
+  const [draggingId, setDraggingId] = useState(null);
+  const [dragOverDate, setDragOverDate] = useState(null);
 
   // Quick-add state
   const [newTitle, setNewTitle] = useState("");
@@ -446,6 +449,7 @@ export default function App() {
             {navBtn("missions",   "Missions",          "◈")}
             {navBtn("rituels",    "Rituels — Anissa",  "↺")}
             {navBtn("timeline",   "Timeline 7 jours",  "▦")}
+            {navBtn("calendrier", "Calendrier",        "▤")}
             {navBtn("historique", "Historique",        "❒")}
             {navBtn("archive",    "Archive",           "▣")}
           </div>
@@ -487,6 +491,7 @@ export default function App() {
                   missions: "Missions",
                   rituels: "Rituels quotidiens — Anissa",
                   timeline: "Timeline — 7 prochains jours",
+                  calendrier: "Calendrier — drag & drop",
                   historique: "Historique des tâches livrées",
                   archive: "Archive",
                 }[view]}
@@ -498,6 +503,8 @@ export default function App() {
                   ? `${ritualsDone.length} / ${RITUALS.length} complétés aujourd'hui`
                   : view === "timeline"
                   ? "Les 7 prochains jours"
+                  : view === "calendrier"
+                  ? "Glisse une tâche pour la replacer dans le mois"
                   : view === "historique"
                   ? `${doneTasks.length} tâche${doneTasks.length !== 1 ? "s" : ""} livrée${doneTasks.length !== 1 ? "s" : ""} au total`
                   : `${doneTasks.length} tâche${doneTasks.length !== 1 ? "s" : ""} archivée${doneTasks.length !== 1 ? "s" : ""}`}
@@ -814,6 +821,154 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {/* ── CALENDRIER (mensuel, drag & drop) ── */}
+            {view === "calendrier" && (() => {
+              const [yy, mm] = calendarMonth.split("-").map(Number);
+              const firstDay = new Date(yy, mm - 1, 1);
+              const lastDay = new Date(yy, mm, 0);
+              const daysInMonth = lastDay.getDate();
+              const startWeekday = (firstDay.getDay() + 6) % 7;
+              const cells = [];
+              for (let i = 0; i < startWeekday; i++) cells.push(null);
+              for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(yy, mm - 1, d));
+              while (cells.length % 7 !== 0) cells.push(null);
+
+              function shiftCalMonth(delta) {
+                const d = new Date(yy, mm - 1 + delta, 1);
+                setCalendarMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+              }
+
+              function onDragStart(e, taskId) {
+                e.dataTransfer.setData("text/plain", taskId);
+                e.dataTransfer.effectAllowed = "move";
+                setDraggingId(taskId);
+              }
+              function onDragEnd() {
+                setDraggingId(null);
+                setDragOverDate(null);
+              }
+              function onDragOverCell(e, dateStr) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (dragOverDate !== dateStr) setDragOverDate(dateStr);
+              }
+              function onDropCell(e, dateStr) {
+                e.preventDefault();
+                const taskId = e.dataTransfer.getData("text/plain");
+                if (taskId) updateDue(taskId, dateStr);
+                setDraggingId(null);
+                setDragOverDate(null);
+              }
+
+              const calendarTasks = tasks.filter(t =>
+                t.status !== "done" && (filter === "all" || t.client === filter)
+              );
+              const undated = calendarTasks.filter(t => !t.due);
+
+              const TaskChip = ({ task }) => {
+                const cl = clientById[task.client];
+                const isDragging = draggingId === task.id;
+                return (
+                  <div
+                    draggable
+                    onDragStart={(e) => onDragStart(e, task.id)}
+                    onDragEnd={onDragEnd}
+                    title={`${task.title} — ${cl.name}${task.project ? " · " + task.project : ""}`}
+                    style={{
+                      fontSize: "9px", padding: "3px 6px", borderRadius: "3px",
+                      background: C.surface,
+                      borderLeft: `2px solid ${cl.color}`,
+                      color: C.navy, lineHeight: "1.3",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      cursor: "grab", opacity: isDragging ? 0.4 : 1,
+                      userSelect: "none",
+                    }}
+                  >
+                    {task.priority === "urgent" && <span style={{ color: C.red, fontWeight: "700", marginRight: "3px" }}>!</span>}
+                    {task.title}
+                  </div>
+                );
+              };
+
+              return (
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+                    <button onClick={() => shiftCalMonth(-1)} style={{ fontSize: "12px", padding: "6px 14px", borderRadius: "6px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer" }}>← Mois précédent</button>
+                    <div style={{ fontFamily: C.serif, fontSize: "20px", fontWeight: "700", color: C.navy, textTransform: "capitalize" }}>{fmtMonth(calendarMonth)}</div>
+                    <button onClick={() => shiftCalMonth(1)} style={{ fontSize: "12px", padding: "6px 14px", borderRadius: "6px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer" }}>Mois suivant →</button>
+                  </div>
+
+                  <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "12px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px", marginBottom: "8px" }}>
+                      {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map(d => (
+                        <div key={d} style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, fontWeight: "600", textAlign: "center", padding: "4px 0" }}>{d}</div>
+                      ))}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px" }}>
+                      {cells.map((cell, i) => {
+                        if (!cell) return <div key={i} style={{ minHeight: "100px" }} />;
+                        const cellStr = `${cell.getFullYear()}-${String(cell.getMonth() + 1).padStart(2, "0")}-${String(cell.getDate()).padStart(2, "0")}`;
+                        const dayTasks = calendarTasks.filter(t => t.due === cellStr);
+                        const isToday = cellStr === todayISO();
+                        const isOver = dragOverDate === cellStr;
+                        return (
+                          <div
+                            key={i}
+                            onDragOver={(e) => onDragOverCell(e, cellStr)}
+                            onDragLeave={() => setDragOverDate(prev => prev === cellStr ? null : prev)}
+                            onDrop={(e) => onDropCell(e, cellStr)}
+                            style={{
+                              background: isOver ? C.blueFaint : isToday ? C.navyFaint : C.bg,
+                              border: `1px solid ${isOver ? C.blue : isToday ? C.navy + "28" : C.borderSoft}`,
+                              borderRadius: "8px", padding: "6px", minHeight: "100px",
+                              display: "flex", flexDirection: "column", gap: "3px",
+                              transition: "background 0.1s, border-color 0.1s",
+                            }}
+                          >
+                            <div style={{ fontSize: "11px", fontWeight: "700", color: isToday ? C.blue : C.navy, marginBottom: "3px" }}>{cell.getDate()}</div>
+                            {dayTasks.map(t => <TaskChip key={t.id} task={t} />)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Sans date — drop zone to remove the due date */}
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const taskId = e.dataTransfer.getData("text/plain");
+                      if (taskId) updateDue(taskId, null);
+                      setDraggingId(null);
+                      setDragOverDate(null);
+                    }}
+                    style={{
+                      marginTop: "16px", background: C.surface,
+                      border: `1px dashed ${C.border}`, borderRadius: "10px",
+                      padding: "14px 16px",
+                    }}
+                  >
+                    <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "10px" }}>
+                      Sans date assignée — {undated.length} tâche{undated.length !== 1 ? "s" : ""} (glisse-en une vers un jour, ou glisse une tâche datée ici pour retirer sa date)
+                    </div>
+                    {undated.length > 0 ? (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
+                        {undated.map(t => <TaskChip key={t.id} task={t} />)}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: "11px", color: C.muted, fontStyle: "italic" }}>Aucune tâche sans date.</div>
+                    )}
+                  </div>
+
+                  <div style={{ marginTop: "10px", fontSize: "11px", color: C.muted, textAlign: "center" }}>
+                    {calendarTasks.length - undated.length} tâche{calendarTasks.length - undated.length !== 1 ? "s" : ""} planifiée{calendarTasks.length - undated.length !== 1 ? "s" : ""}
+                    {filter !== "all" && ` · filtre client : ${clientById[filter]?.name}`}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── HISTORIQUE (calendrier mensuel) ── */}
             {view === "historique" && (() => {
