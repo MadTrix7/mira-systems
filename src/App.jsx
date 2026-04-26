@@ -92,7 +92,7 @@ function StatusBadge({ status, small }) {
   );
 }
 
-function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring }) {
+function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring, onChangeDue }) {
   const cl = clientById[task.client];
   const isRecurring = task.recurring === "monthly";
   return (
@@ -170,6 +170,34 @@ function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring 
               </button>
             ))}
           </div>
+          {onChangeDue && (
+            <div style={{ marginTop: "10px", display: "flex", gap: "8px", alignItems: "center" }}>
+              <span style={{ fontSize: "9px", color: C.muted, letterSpacing: "0.08em" }}>DATE PRÉVUE :</span>
+              <input
+                type="date"
+                value={task.due || ""}
+                onChange={(e) => onChangeDue(e.target.value || null)}
+                style={{
+                  fontSize: "11px", padding: "4px 8px", borderRadius: "6px",
+                  border: `1px solid ${C.border}`, background: C.surface,
+                  color: C.navy, fontFamily: C.sans, cursor: "pointer",
+                }}
+              />
+              {task.due && (
+                <button
+                  onClick={() => onChangeDue(null)}
+                  title="Retirer la date"
+                  style={{
+                    fontSize: "9px", color: C.muted, background: "none",
+                    border: `1px solid ${C.border}`, borderRadius: "4px",
+                    padding: "3px 8px", cursor: "pointer",
+                  }}
+                >
+                  Sans date
+                </button>
+              )}
+            </div>
+          )}
           {onToggleRecurring && (
             <div style={{ marginTop: "10px", display: "flex", gap: "8px", alignItems: "center" }}>
               <span style={{ fontSize: "9px", color: C.muted, letterSpacing: "0.08em" }}>RÉCURRENCE :</span>
@@ -280,6 +308,14 @@ export default function App() {
         if (t.id !== id) return t;
         return { ...t, recurring: t.recurring === "monthly" ? null : "monthly" };
       });
+      saveTasks(updated);
+      return updated;
+    });
+  }
+
+  function updateDue(id, due) {
+    setTasks(prev => {
+      const updated = prev.map(t => t.id === id ? { ...t, due } : t);
       saveTasks(updated);
       return updated;
     });
@@ -516,6 +552,7 @@ export default function App() {
                           onToggle={() => setExpanded(expanded === task.id ? null : task.id)}
                           onStatusChange={(s) => updateStatus(task.id, s)}
                           onToggleRecurring={() => updateRecurring(task.id)}
+                          onChangeDue={(d) => updateDue(task.id, d)}
                         />
                       ))}
                     </div>
