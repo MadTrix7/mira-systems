@@ -50,6 +50,28 @@ function isOverdue(s) {
   return new Date(s) < TODAY;
 }
 
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addOneMonth(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  d.setMonth(d.getMonth() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function ymKey(dateStr) {
+  // "2026-04-26" → "2026-04"
+  return dateStr ? dateStr.slice(0, 7) : "";
+}
+
+function fmtMonth(ym) {
+  if (!ym) return "";
+  const [y, m] = ym.split("-");
+  return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+}
+
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function ClientDot({ id, size = 8 }) {
@@ -70,8 +92,9 @@ function StatusBadge({ status, small }) {
   );
 }
 
-function TaskCard({ task, expanded, onToggle, onStatusChange }) {
+function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring }) {
   const cl = clientById[task.client];
+  const isRecurring = task.recurring === "monthly";
   return (
     <div style={{
       background: C.surface,
@@ -91,6 +114,11 @@ function TaskCard({ task, expanded, onToggle, onStatusChange }) {
             {task.priority === "urgent" && (
               <span style={{ fontSize: "8px", padding: "1px 6px", borderRadius: "3px", background: C.redFaint, color: C.red, fontWeight: "700", letterSpacing: "0.08em" }}>
                 URGENT
+              </span>
+            )}
+            {isRecurring && (
+              <span title="Tâche mensuelle récurrente" style={{ fontSize: "8px", padding: "1px 6px", borderRadius: "3px", background: C.violetFaint, color: C.violet, fontWeight: "700", letterSpacing: "0.08em" }}>
+                ↻ MENSUEL
               </span>
             )}
             <span style={{ fontSize: "13px", fontWeight: "600", color: C.navy, letterSpacing: "-0.01em" }}>
@@ -142,6 +170,28 @@ function TaskCard({ task, expanded, onToggle, onStatusChange }) {
               </button>
             ))}
           </div>
+          {onToggleRecurring && (
+            <div style={{ marginTop: "10px", display: "flex", gap: "8px", alignItems: "center" }}>
+              <span style={{ fontSize: "9px", color: C.muted, letterSpacing: "0.08em" }}>RÉCURRENCE :</span>
+              <button
+                onClick={onToggleRecurring}
+                style={{
+                  fontSize: "9px", padding: "3px 10px", borderRadius: "20px",
+                  border: `1px solid ${isRecurring ? C.violet : C.border}`,
+                  background: isRecurring ? C.violetFaint : "transparent",
+                  color: isRecurring ? C.violet : C.muted,
+                  cursor: "pointer", letterSpacing: "0.05em", fontWeight: isRecurring ? "600" : "400",
+                }}
+              >
+                {isRecurring ? "↻ Mensuel (cliquer pour désactiver)" : "Marquer comme mensuel"}
+              </button>
+            </div>
+          )}
+          {task.doneAt && task.status === "done" && (
+            <div style={{ marginTop: "8px", fontSize: "9px", color: C.muted, letterSpacing: "0.05em" }}>
+              ✓ Livré le {new Date(task.doneAt).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -157,6 +207,7 @@ export default function App() {
   const [ritualsDone, setRitualsDone] = useState(() => loadRitualsDone());
   const [ritualExpanded, setRitualExpanded] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [historyMonth, setHistoryMonth] = useState(ymKey(todayISO()));
 
   // Quick-add state
   const [rawInput, setRawInput] = useState("");
@@ -183,11 +234,55 @@ export default function App() {
 
   function updateStatus(id, status) {
     setTasks(prev => {
-      const updated = prev.map(t => t.id === id ? { ...t, status } : t);
+      const today = todayISO();
+      const target = prev.find(t => t.id === id);
+      const wasDone = target && target.status === "done";
+      const isDone = status === "done";
+
+      let updated = prev.map(t => {
+        if (t.id !== id) return t;
+        return {
+          ...t,
+          status,
+          doneAt: isDone ? (t.doneAt || today) : null,
+        };
+      });
+
+      // Auto-clone monthly recurring task when newly marked done
+      if (!wasDone && isDone && target && target.recurring === "monthly") {
+        const baseDue = target.due || today;
+        const nextDue = addOneMonth(baseDue);
+        const baseId = target.id.replace(/-r\d{6}$/, "");
+        const newId = `${baseId}-r${ymKey(nextDue).replace("-", "")}`;
+        const alreadyExists = prev.some(t => t.id === newId);
+        if (!alreadyExists) {
+          const clone = {
+            ...target,
+            id: newId,
+            status: "upcoming",
+            due: nextDue,
+            doneAt: null,
+            recurring: "monthly",
+          };
+          updated = [...updated, clone];
+        }
+      }
+
       saveTasks(updated);
       return updated;
     });
     setExpanded(null);
+  }
+
+  function updateRecurring(id) {
+    setTasks(prev => {
+      const updated = prev.map(t => {
+        if (t.id !== id) return t;
+        return { ...t, recurring: t.recurring === "monthly" ? null : "monthly" };
+      });
+      saveTasks(updated);
+      return updated;
+    });
   }
 
   function closeModal() {
@@ -318,9 +413,11 @@ export default function App() {
           {/* Nav */}
           <div style={{ padding: "12px 8px 4px" }}>
             <div style={{ fontSize: "8px", letterSpacing: "0.14em", color: C.muted, padding: "0 6px", marginBottom: "5px", textTransform: "uppercase" }}>Vue</div>
-            {navBtn("missions",  "Missions",          "◈")}
-            {navBtn("rituels",   "Rituels — Anissa",  "↺")}
-            {navBtn("timeline",  "Timeline 7 jours",  "▦")}
+            {navBtn("missions",   "Missions",          "◈")}
+            {navBtn("rituels",    "Rituels — Anissa",  "↺")}
+            {navBtn("timeline",   "Timeline 7 jours",  "▦")}
+            {navBtn("historique", "Historique",        "❒")}
+            {navBtn("archive",    "Archive",           "▣")}
           </div>
 
           <div style={{ padding: "10px 8px 4px" }}>
@@ -356,14 +453,24 @@ export default function App() {
           <header style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: "14px 24px", display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
             <div style={{ flex: 1 }}>
               <h1 style={{ fontFamily: C.serif, fontSize: "19px", fontWeight: "700", color: C.navy, lineHeight: 1.2 }}>
-                {view === "missions" ? "Missions" : view === "rituels" ? "Rituels quotidiens — Anissa" : "Timeline — 7 prochains jours"}
+                {{
+                  missions: "Missions",
+                  rituels: "Rituels quotidiens — Anissa",
+                  timeline: "Timeline — 7 prochains jours",
+                  historique: "Historique des tâches livrées",
+                  archive: "Archive",
+                }[view]}
               </h1>
               <p style={{ fontSize: "11px", color: C.muted, marginTop: "2px" }}>
                 {view === "missions"
                   ? `${activeTasks.length} mission${activeTasks.length !== 1 ? "s" : ""} en cours`
                   : view === "rituels"
                   ? `${ritualsDone.length} / ${RITUALS.length} complétés aujourd'hui`
-                  : "24 avr – 30 avr 2026"}
+                  : view === "timeline"
+                  ? "Les 7 prochains jours"
+                  : view === "historique"
+                  ? `${doneTasks.length} tâche${doneTasks.length !== 1 ? "s" : ""} livrée${doneTasks.length !== 1 ? "s" : ""} au total`
+                  : `${doneTasks.length} tâche${doneTasks.length !== 1 ? "s" : ""} archivée${doneTasks.length !== 1 ? "s" : ""}`}
               </p>
             </div>
             {view === "missions" && (
@@ -408,6 +515,7 @@ export default function App() {
                           expanded={expanded === task.id}
                           onToggle={() => setExpanded(expanded === task.id ? null : task.id)}
                           onStatusChange={(s) => updateStatus(task.id, s)}
+                          onToggleRecurring={() => updateRecurring(task.id)}
                         />
                       ))}
                     </div>
@@ -606,6 +714,149 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {/* ── ARCHIVE ── */}
+            {view === "archive" && (
+              <div>
+                {doneTasks.length === 0 ? (
+                  <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "40px 20px", textAlign: "center" }}>
+                    <div style={{ fontSize: "13px", color: C.muted }}>Aucune tâche archivée pour le moment.</div>
+                    <div style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>Marque une tâche comme « Livré » pour la voir apparaître ici.</div>
+                  </div>
+                ) : (
+                  (() => {
+                    const sorted = [...doneTasks].sort((a, b) => {
+                      const da = a.doneAt || a.due || "0";
+                      const db = b.doneAt || b.due || "0";
+                      return db.localeCompare(da);
+                    });
+                    const groups = {};
+                    sorted.forEach(t => {
+                      const key = ymKey(t.doneAt || t.due) || "sans-date";
+                      (groups[key] = groups[key] || []).push(t);
+                    });
+                    const keys = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+                    return keys.map(k => (
+                      <div key={k} style={{ marginBottom: "26px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "11px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "600", color: C.navy, textTransform: "capitalize" }}>
+                            {k === "sans-date" ? "Sans date" : fmtMonth(k)}
+                          </span>
+                          <div style={{ flex: 1, height: "1px", background: C.borderSoft }} />
+                          <span style={{ fontSize: "10px", color: C.muted }}>{groups[k].length}</span>
+                        </div>
+                        {groups[k].map(task => {
+                          const cl = clientById[task.client];
+                          return (
+                            <div key={task.id} className="hover-bg" style={{
+                              background: C.surface, border: `1px solid ${C.border}`,
+                              borderRadius: "8px", borderLeft: `3px solid ${cl.color}`,
+                              padding: "10px 16px", marginBottom: "5px",
+                              display: "flex", alignItems: "center", gap: "12px",
+                            }}>
+                              <span style={{ fontSize: "11px", color: C.green, fontWeight: "700" }}>✓</span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: "12px", fontWeight: "600", color: C.navy }}>{task.title}</div>
+                                <div style={{ fontSize: "10px", color: C.muted, marginTop: "2px" }}>
+                                  {cl.name} · {task.project}
+                                  {task.recurring === "monthly" && <span style={{ color: C.violet, marginLeft: "6px" }}>· ↻ mensuel</span>}
+                                </div>
+                              </div>
+                              <span style={{ fontSize: "10px", color: C.muted, whiteSpace: "nowrap" }}>
+                                {task.doneAt
+                                  ? `Livré ${new Date(task.doneAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`
+                                  : `Prévu ${fmtDate(task.due)}`}
+                              </span>
+                              <button
+                                onClick={() => updateStatus(task.id, "active")}
+                                style={{ fontSize: "9px", color: C.muted, background: "none", border: `1px solid ${C.border}`, borderRadius: "4px", padding: "3px 8px", cursor: "pointer" }}
+                              >
+                                Rouvrir
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ));
+                  })()
+                )}
+              </div>
+            )}
+
+            {/* ── HISTORIQUE (calendrier mensuel) ── */}
+            {view === "historique" && (() => {
+              const [yy, mm] = historyMonth.split("-").map(Number);
+              const firstDay = new Date(yy, mm - 1, 1);
+              const lastDay = new Date(yy, mm, 0);
+              const daysInMonth = lastDay.getDate();
+              // Monday=0, Sunday=6 (FR convention)
+              const startWeekday = (firstDay.getDay() + 6) % 7;
+              const cells = [];
+              for (let i = 0; i < startWeekday; i++) cells.push(null);
+              for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(yy, mm - 1, d));
+              while (cells.length % 7 !== 0) cells.push(null);
+
+              function shiftMonth(delta) {
+                const d = new Date(yy, mm - 1 + delta, 1);
+                setHistoryMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+              }
+
+              const monthTasks = doneTasks.filter(t => ymKey(t.doneAt) === historyMonth);
+
+              return (
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+                    <button onClick={() => shiftMonth(-1)} style={{ fontSize: "12px", padding: "6px 14px", borderRadius: "6px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer" }}>← Mois précédent</button>
+                    <div style={{ fontFamily: C.serif, fontSize: "20px", fontWeight: "700", color: C.navy, textTransform: "capitalize" }}>{fmtMonth(historyMonth)}</div>
+                    <button onClick={() => shiftMonth(1)} style={{ fontSize: "12px", padding: "6px 14px", borderRadius: "6px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer" }}>Mois suivant →</button>
+                  </div>
+
+                  <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "12px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px", marginBottom: "8px" }}>
+                      {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map(d => (
+                        <div key={d} style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, fontWeight: "600", textAlign: "center", padding: "4px 0" }}>{d}</div>
+                      ))}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px" }}>
+                      {cells.map((cell, i) => {
+                        if (!cell) return <div key={i} style={{ minHeight: "90px" }} />;
+                        const cellStr = `${cell.getFullYear()}-${String(cell.getMonth() + 1).padStart(2, "0")}-${String(cell.getDate()).padStart(2, "0")}`;
+                        const dayTasks = doneTasks.filter(t => t.doneAt === cellStr && (filter === "all" || t.client === filter));
+                        const isToday = cellStr === todayISO();
+                        return (
+                          <div key={i} style={{
+                            background: isToday ? C.navyFaint : C.bg,
+                            border: `1px solid ${isToday ? C.navy + "28" : C.borderSoft}`,
+                            borderRadius: "8px", padding: "6px", minHeight: "90px",
+                            display: "flex", flexDirection: "column", gap: "3px",
+                          }}>
+                            <div style={{ fontSize: "11px", fontWeight: "700", color: isToday ? C.blue : C.navy, marginBottom: "3px" }}>{cell.getDate()}</div>
+                            {dayTasks.map(t => {
+                              const cl = clientById[t.client];
+                              return (
+                                <div key={t.id} title={t.title} style={{
+                                  fontSize: "9px", padding: "3px 5px", borderRadius: "3px",
+                                  background: C.surface, borderLeft: `2px solid ${cl.color}`,
+                                  color: C.navy, lineHeight: "1.3",
+                                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                                }}>
+                                  {t.title}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: "14px", fontSize: "11px", color: C.muted, textAlign: "center" }}>
+                    {monthTasks.length} tâche{monthTasks.length !== 1 ? "s" : ""} livrée{monthTasks.length !== 1 ? "s" : ""} ce mois-ci
+                    {filter !== "all" && ` · filtre client : ${clientById[filter]?.name}`}
+                  </div>
+                </div>
+              );
+            })()}
           </main>
         </div>
       </div>

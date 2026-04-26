@@ -732,6 +732,7 @@ export const INITIAL_TASKS = [
     due: "2026-04-30",
     project: "Maintenance",
     priority: null,
+    recurring: "monthly",
     title: "Maintenance tags GHL + suivi continuations",
     description: "Tâches récurrentes de maintenance CRM.",
     steps: [
@@ -748,6 +749,7 @@ export const INITIAL_TASKS = [
     due: "2026-05-01",
     project: "Maintenance",
     priority: null,
+    recurring: "monthly",
     title: "Audit mensuel qualité base",
     description: "Premier audit mensuel de la base CRM.",
     steps: [
