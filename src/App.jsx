@@ -4,6 +4,8 @@ import { INITIAL_TASKS } from "./data/tasks";
 import { RITUALS } from "./data/rituals";
 import { saveTasks, loadTasks, saveRitualsDone, loadRitualsDone } from "./lib/storage";
 
+const API_URL = "https://mira-systems-api.PLACEHOLDER.workers.dev";
+
 // ─── Design tokens ──────────────────────────────────────────────────────────
 const C = {
   bg: "#FAFAF8",
@@ -202,35 +204,26 @@ export default function App() {
     setAiResult(null);
     const cl = clientById[addClient];
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch(`${API_URL}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [{
-            role: "user",
-            content: `Tu es l'assistant de Mathéo, fondateur de Mira Systems basé à Cologne. Client concerné : ${cl.name} (${cl.type}).
-
-Tâche brute saisie : "${rawInput}"
-
-Réponds UNIQUEMENT en JSON valide, sans balises markdown, sans aucun texte avant ou après :
-{
-  "title": "Titre professionnel précis, max 65 caractères",
-  "description": "1 à 2 phrases décrivant l'objectif et le livrable attendu",
-  "steps": ["Étape 1 avec verbe d'action", "Étape 2", "..."]
-}
-
-4 à 6 étapes maximum. Chaque étape commence par un verbe d'action à l'infinitif.`,
-          }],
+          rawInput,
+          clientName: cl.name,
+          clientType: cl.type,
         }),
       });
       const data = await res.json();
-      const raw = data.content?.[0]?.text || "";
-      const clean = raw.replace(/```json|```/g, "").trim();
-      setAiResult(JSON.parse(clean));
-    } catch {
-      setAiError("Erreur de génération. Vérifie ta connexion et réessaie.");
+      if (!res.ok) {
+        console.error("Generation failed:", res.status, data);
+        setAiError(`Erreur ${res.status} : ${data.error || "génération impossible"}`);
+        setAiLoading(false);
+        return;
+      }
+      setAiResult(data);
+    } catch (err) {
+      console.error("Generation network error:", err);
+      setAiError("Erreur réseau. Vérifie ta connexion et réessaie.");
     }
     setAiLoading(false);
   }
