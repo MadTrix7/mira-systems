@@ -92,7 +92,7 @@ function StatusBadge({ status, small }) {
   );
 }
 
-function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring, onChangeDue }) {
+function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring, onChangeDue, onChangeTitle }) {
   const cl = clientById[task.client];
   const isRecurring = task.recurring === "monthly";
   return (
@@ -140,6 +140,22 @@ function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring,
       {/* Expanded */}
       {expanded && (
         <div style={{ borderTop: `1px solid ${C.borderSoft}`, padding: "14px 16px", background: "#FDFCFB" }}>
+          {onChangeTitle && (
+            <div style={{ marginBottom: "14px" }}>
+              <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "5px" }}>Titre</div>
+              <input
+                type="text"
+                value={task.title}
+                onChange={(e) => onChangeTitle(e.target.value)}
+                style={{
+                  width: "100%", fontSize: "13px", fontWeight: "600",
+                  padding: "7px 10px", borderRadius: "6px",
+                  border: `1px solid ${C.border}`, background: C.surface,
+                  color: C.navy, fontFamily: C.sans,
+                }}
+              />
+            </div>
+          )}
           <p style={{ fontSize: "12px", color: "#4A4845", lineHeight: "1.7", marginBottom: "14px", fontStyle: "italic" }}>
             {task.description}
           </p>
@@ -316,6 +332,14 @@ export default function App() {
   function updateDue(id, due) {
     setTasks(prev => {
       const updated = prev.map(t => t.id === id ? { ...t, due } : t);
+      saveTasks(updated);
+      return updated;
+    });
+  }
+
+  function updateTitle(id, title) {
+    setTasks(prev => {
+      const updated = prev.map(t => t.id === id ? { ...t, title } : t);
       saveTasks(updated);
       return updated;
     });
@@ -553,6 +577,7 @@ export default function App() {
                           onStatusChange={(s) => updateStatus(task.id, s)}
                           onToggleRecurring={() => updateRecurring(task.id)}
                           onChangeDue={(d) => updateDue(task.id, d)}
+                          onChangeTitle={(t) => updateTitle(task.id, t)}
                         />
                       ))}
                     </div>
