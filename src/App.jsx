@@ -1,0 +1,774 @@
+import { useState } from "react";
+import { CLIENTS, clientById } from "./data/clients";
+import { INITIAL_TASKS } from "./data/tasks";
+import { RITUALS } from "./data/rituals";
+import { saveTasks, loadTasks, saveRitualsDone, loadRitualsDone } from "./lib/storage";
+
+// ─── Design tokens ──────────────────────────────────────────────────────────
+const C = {
+  bg: "#FAFAF8",
+  surface: "#FFFFFF",
+  border: "#E2E0DB",
+  borderSoft: "#F0EDE7",
+  navy: "#1A1A2E",
+  navyFaint: "#F0EFF9",
+  blue: "#2D5BE3",
+  blueFaint: "#EBF0FE",
+  amber: "#B45309",
+  amberFaint: "#FEF3C7",
+  green: "#065F46",
+  greenFaint: "#D1FAE5",
+  red: "#B91C1C",
+  redFaint: "#FEE2E2",
+  violet: "#6D28D9",
+  violetFaint: "#F5F3FF",
+  muted: "#8A8880",
+  serif: "'Playfair Display', Georgia, serif",
+  sans: "'DM Sans', sans-serif",
+};
+
+const STATUS = {
+  active:   { label: "En cours", bg: C.blueFaint,   color: C.blue },
+  review:   { label: "Révision", bg: C.amberFaint,  color: C.amber },
+  upcoming: { label: "À venir",  bg: C.violetFaint, color: C.violet },
+  done:     { label: "Livré",    bg: C.greenFaint,  color: C.green },
+};
+
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+const TODAY = new Date();
+
+function fmtDate(s) {
+  if (!s) return "—";
+  return new Date(s).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+
+function isOverdue(s) {
+  if (!s) return false;
+  return new Date(s) < TODAY;
+}
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+function ClientDot({ id, size = 8 }) {
+  const cl = clientById[id];
+  return <span style={{ width: size, height: size, borderRadius: "50%", background: cl?.color || C.muted, display: "inline-block", flexShrink: 0 }} />;
+}
+
+function StatusBadge({ status, small }) {
+  const s = STATUS[status];
+  return (
+    <span style={{
+      fontSize: small ? "8px" : "9px", padding: small ? "1px 6px" : "2px 9px",
+      borderRadius: "20px", background: s.bg, color: s.color,
+      fontWeight: "600", letterSpacing: "0.07em", whiteSpace: "nowrap",
+    }}>
+      {s.label.toUpperCase()}
+    </span>
+  );
+}
+
+function TaskCard({ task, expanded, onToggle, onStatusChange }) {
+  const cl = clientById[task.client];
+  return (
+    <div style={{
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderRadius: "8px",
+      marginBottom: "6px",
+      overflow: "hidden",
+      borderLeft: `3px solid ${cl.color}`,
+    }}>
+      {/* Row */}
+      <div
+        onClick={onToggle}
+        style={{ padding: "11px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: "12px" }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" }}>
+            {task.priority === "urgent" && (
+              <span style={{ fontSize: "8px", padding: "1px 6px", borderRadius: "3px", background: C.redFaint, color: C.red, fontWeight: "700", letterSpacing: "0.08em" }}>
+                URGENT
+              </span>
+            )}
+            <span style={{ fontSize: "13px", fontWeight: "600", color: C.navy, letterSpacing: "-0.01em" }}>
+              {task.title}
+            </span>
+          </div>
+          <div style={{ fontSize: "10px", color: C.muted, marginTop: "3px" }}>
+            {cl.name} &middot; {task.project}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+          <span style={{ fontSize: "11px", color: isOverdue(task.due) ? C.red : C.muted, fontWeight: isOverdue(task.due) ? "600" : "400" }}>
+            {fmtDate(task.due)}
+          </span>
+          <span style={{ fontSize: "9px", color: C.muted, display: "inline-block", transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
+        </div>
+      </div>
+
+      {/* Expanded */}
+      {expanded && (
+        <div style={{ borderTop: `1px solid ${C.borderSoft}`, padding: "14px 16px", background: "#FDFCFB" }}>
+          <p style={{ fontSize: "12px", color: "#4A4845", lineHeight: "1.7", marginBottom: "14px", fontStyle: "italic" }}>
+            {task.description}
+          </p>
+          <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "9px" }}>Étapes</div>
+          {task.steps.map((step, i) => (
+            <div key={i} style={{ display: "flex", gap: "10px", marginBottom: "7px", alignItems: "flex-start" }}>
+              <span style={{ fontSize: "10px", color: cl.color, fontWeight: "700", flexShrink: 0, lineHeight: "1.6" }}>
+                {String(i + 1).padStart(2, "0")}
+              </span>
+              <span style={{ fontSize: "12px", color: C.navy, lineHeight: "1.6" }}>{step}</span>
+            </div>
+          ))}
+          <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: `1px solid ${C.borderSoft}`, display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "9px", color: C.muted, letterSpacing: "0.08em", alignSelf: "center", marginRight: "4px" }}>STATUT :</span>
+            {Object.entries(STATUS).map(([key, val]) => (
+              <button
+                key={key}
+                onClick={() => onStatusChange(key)}
+                style={{
+                  fontSize: "9px", padding: "3px 10px", borderRadius: "20px",
+                  border: `1px solid ${task.status === key ? val.color : C.border}`,
+                  background: task.status === key ? val.bg : "transparent",
+                  color: task.status === key ? val.color : C.muted,
+                  cursor: "pointer", letterSpacing: "0.05em", fontWeight: task.status === key ? "600" : "400",
+                }}
+              >
+                {val.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const [view, setView] = useState("missions");
+  const [filter, setFilter] = useState("all");
+  const [tasks, setTasks] = useState(() => loadTasks(INITIAL_TASKS));
+  const [expanded, setExpanded] = useState(null);
+  const [ritualsDone, setRitualsDone] = useState(() => loadRitualsDone());
+  const [ritualExpanded, setRitualExpanded] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+
+  // Quick-add state
+  const [rawInput, setRawInput] = useState("");
+  const [addClient, setAddClient] = useState("vitamine-s");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
+  const [aiError, setAiError] = useState(null);
+
+  // Filtered tasks
+  const activeTasks = tasks.filter(t =>
+    t.status !== "done" && (filter === "all" || t.client === filter)
+  );
+  const doneTasks = tasks.filter(t =>
+    t.status === "done" && (filter === "all" || t.client === filter)
+  );
+  const taskCount = { active: tasks.filter(t => t.status === "active").length, done: tasks.filter(t => t.status === "done").length };
+
+  // Timeline — next 7 days
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(TODAY);
+    d.setDate(TODAY.getDate() + i);
+    return d;
+  });
+
+  function updateStatus(id, status) {
+    setTasks(prev => {
+      const updated = prev.map(t => t.id === id ? { ...t, status } : t);
+      saveTasks(updated);
+      return updated;
+    });
+    setExpanded(null);
+  }
+
+  function closeModal() {
+    setShowModal(false);
+    setAiResult(null);
+    setRawInput("");
+    setAiError(null);
+  }
+
+  async function generateWithAI() {
+    if (!rawInput.trim() || aiLoading) return;
+    setAiLoading(true);
+    setAiError(null);
+    setAiResult(null);
+    const cl = clientById[addClient];
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          messages: [{
+            role: "user",
+            content: `Tu es l'assistant de Mathéo, fondateur de Mira Systems basé à Cologne. Client concerné : ${cl.name} (${cl.type}).
+
+Tâche brute saisie : "${rawInput}"
+
+Réponds UNIQUEMENT en JSON valide, sans balises markdown, sans aucun texte avant ou après :
+{
+  "title": "Titre professionnel précis, max 65 caractères",
+  "description": "1 à 2 phrases décrivant l'objectif et le livrable attendu",
+  "steps": ["Étape 1 avec verbe d'action", "Étape 2", "..."]
+}
+
+4 à 6 étapes maximum. Chaque étape commence par un verbe d'action à l'infinitif.`,
+          }],
+        }),
+      });
+      const data = await res.json();
+      const raw = data.content?.[0]?.text || "";
+      const clean = raw.replace(/```json|```/g, "").trim();
+      setAiResult(JSON.parse(clean));
+    } catch {
+      setAiError("Erreur de génération. Vérifie ta connexion et réessaie.");
+    }
+    setAiLoading(false);
+  }
+
+  function saveTask() {
+    if (!aiResult) return;
+    const newTask = {
+      id: `task-${Date.now()}`,
+      client: addClient,
+      status: "upcoming",
+      due: null,
+      project: "Divers",
+      priority: null,
+      title: aiResult.title,
+      description: aiResult.description,
+      steps: aiResult.steps,
+    };
+    setTasks(prev => {
+      const updated = [newTask, ...prev];
+      saveTasks(updated);
+      return updated;
+    });
+    closeModal();
+  }
+
+  const navBtn = (id, label, icon) => (
+    <button
+      key={id}
+      onClick={() => setView(id)}
+      style={{
+        display: "flex", alignItems: "center", gap: "8px",
+        padding: "8px 11px", borderRadius: "6px", border: "none",
+        background: view === id ? C.navyFaint : "transparent",
+        color: view === id ? C.navy : C.muted,
+        fontSize: "12px", fontWeight: view === id ? "600" : "400",
+        letterSpacing: "0.02em", cursor: "pointer", width: "100%", textAlign: "left",
+      }}
+    >
+      <span style={{ fontSize: "11px", opacity: 0.6 }}>{icon}</span>
+      {label}
+    </button>
+  );
+
+  const filterBtn = (id, label, dot) => (
+    <button
+      key={id}
+      onClick={() => setFilter(id)}
+      style={{
+        display: "flex", alignItems: "center", gap: "7px",
+        padding: "7px 11px", borderRadius: "6px", border: "none",
+        background: filter === id ? C.navyFaint : "transparent",
+        color: filter === id ? C.navy : C.muted,
+        fontSize: "12px", fontWeight: filter === id ? "600" : "400",
+        cursor: "pointer", width: "100%", textAlign: "left",
+        marginBottom: "1px",
+      }}
+    >
+      {dot}
+      {label}
+    </button>
+  );
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: ${C.bg}; font-family: ${C.sans}; }
+        ::-webkit-scrollbar { width: 3px; }
+        ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 2px; }
+        .hover-bg:hover { background: ${C.bg} !important; }
+        .hover-lift:hover { transform: translateY(-1px); opacity: 0.9; }
+        .hover-lift { transition: transform 0.15s ease, opacity 0.15s ease; }
+        input:focus { outline: 2px solid ${C.navy}40 !important; }
+      `}</style>
+
+      <div style={{ display: "flex", height: "100vh", overflow: "hidden", fontFamily: C.sans, background: C.bg }}>
+
+        {/* ── SIDEBAR ─────────────────────────────────────────────── */}
+        <aside style={{ width: "210px", flexShrink: 0, background: C.surface, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column" }}>
+          {/* Brand */}
+          <div style={{ padding: "18px 16px 14px", borderBottom: `1px solid ${C.borderSoft}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: C.navy }} />
+              <span style={{ fontFamily: C.serif, fontSize: "15px", fontWeight: "700", color: C.navy }}>Mira Systems</span>
+            </div>
+            <div style={{ fontSize: "9px", letterSpacing: "0.14em", color: C.muted, marginTop: "2px", paddingLeft: "14px" }}>
+              GESTION CLIENT
+            </div>
+          </div>
+
+          {/* Nav */}
+          <div style={{ padding: "12px 8px 4px" }}>
+            <div style={{ fontSize: "8px", letterSpacing: "0.14em", color: C.muted, padding: "0 6px", marginBottom: "5px", textTransform: "uppercase" }}>Vue</div>
+            {navBtn("missions",  "Missions",          "◈")}
+            {navBtn("rituels",   "Rituels — Anissa",  "↺")}
+            {navBtn("timeline",  "Timeline 7 jours",  "▦")}
+          </div>
+
+          <div style={{ padding: "10px 8px 4px" }}>
+            <div style={{ fontSize: "8px", letterSpacing: "0.14em", color: C.muted, padding: "0 6px", marginBottom: "5px", textTransform: "uppercase" }}>Clients</div>
+            {filterBtn("all", "Tous", <span style={{ fontSize: "8px", color: C.muted }}>●</span>)}
+            {CLIENTS.map(cl => filterBtn(cl.id, cl.name,
+              <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: cl.color, display: "inline-block", flexShrink: 0 }} />
+            ))}
+          </div>
+
+          {/* Stats */}
+          <div style={{ marginTop: "auto", borderTop: `1px solid ${C.borderSoft}`, padding: "14px 12px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "7px" }}>
+              {[
+                { label: "Actives",  val: taskCount.active, color: C.blue },
+                { label: "Livrées",  val: taskCount.done,   color: C.green },
+                { label: "Clients",  val: CLIENTS.length,   color: C.navy },
+                { label: "Rituels",  val: RITUALS.length,   color: "#9B5FC0" },
+              ].map(s => (
+                <div key={s.label} style={{ background: C.bg, borderRadius: "7px", padding: "9px 10px" }}>
+                  <div style={{ fontFamily: C.serif, fontSize: "20px", fontWeight: "700", color: s.color, lineHeight: 1 }}>{s.val}</div>
+                  <div style={{ fontSize: "9px", color: C.muted, marginTop: "3px" }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </aside>
+
+        {/* ── MAIN ────────────────────────────────────────────────── */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
+          {/* Header */}
+          <header style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: "14px 24px", display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
+            <div style={{ flex: 1 }}>
+              <h1 style={{ fontFamily: C.serif, fontSize: "19px", fontWeight: "700", color: C.navy, lineHeight: 1.2 }}>
+                {view === "missions" ? "Missions" : view === "rituels" ? "Rituels quotidiens — Anissa" : "Timeline — 7 prochains jours"}
+              </h1>
+              <p style={{ fontSize: "11px", color: C.muted, marginTop: "2px" }}>
+                {view === "missions"
+                  ? `${activeTasks.length} mission${activeTasks.length !== 1 ? "s" : ""} en cours`
+                  : view === "rituels"
+                  ? `${ritualsDone.length} / ${RITUALS.length} complétés aujourd'hui`
+                  : "24 avr – 30 avr 2026"}
+              </p>
+            </div>
+            {view === "missions" && (
+              <button
+                className="hover-lift"
+                onClick={() => setShowModal(true)}
+                style={{
+                  display: "flex", alignItems: "center", gap: "7px",
+                  padding: "9px 18px", borderRadius: "8px",
+                  background: C.navy, color: "#fff",
+                  border: "none", cursor: "pointer",
+                  fontSize: "12px", fontWeight: "600", letterSpacing: "0.04em",
+                }}
+              >
+                <span style={{ fontSize: "15px", lineHeight: 1 }}>+</span>
+                Ajouter via IA
+              </button>
+            )}
+          </header>
+
+          {/* Scroll area */}
+          <main style={{ flex: 1, overflow: "auto", padding: "22px 24px" }}>
+
+            {/* ── MISSIONS ── */}
+            {view === "missions" && (
+              <div>
+                {(["active", "review", "upcoming"] ).map(st => {
+                  const group = activeTasks.filter(t => t.status === st);
+                  if (!group.length) return null;
+                  const s = STATUS[st];
+                  return (
+                    <div key={st} style={{ marginBottom: "26px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "11px" }}>
+                        <StatusBadge status={st} />
+                        <div style={{ flex: 1, height: "1px", background: C.borderSoft }} />
+                        <span style={{ fontSize: "10px", color: C.muted }}>{group.length}</span>
+                      </div>
+                      {group.map(task => (
+                        <TaskCard
+                          key={task.id}
+                          task={task}
+                          expanded={expanded === task.id}
+                          onToggle={() => setExpanded(expanded === task.id ? null : task.id)}
+                          onStatusChange={(s) => updateStatus(task.id, s)}
+                        />
+                      ))}
+                    </div>
+                  );
+                })}
+
+                {doneTasks.length > 0 && (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "11px" }}>
+                      <StatusBadge status="done" />
+                      <div style={{ flex: 1, height: "1px", background: C.borderSoft }} />
+                      <span style={{ fontSize: "10px", color: C.muted }}>{doneTasks.length}</span>
+                    </div>
+                    {doneTasks.map(task => {
+                      const cl = clientById[task.client];
+                      return (
+                        <div
+                          key={task.id}
+                          className="hover-bg"
+                          style={{
+                            background: C.surface, opacity: 0.55,
+                            border: `1px solid ${C.border}`, borderRadius: "8px",
+                            borderLeft: `3px solid ${cl.color}`,
+                            padding: "10px 16px", marginBottom: "5px",
+                            display: "flex", alignItems: "center",
+                          }}
+                        >
+                          <div style={{ flex: 1 }}>
+                            <span style={{ fontSize: "12px", color: C.muted, textDecoration: "line-through" }}>{task.title}</span>
+                            <div style={{ fontSize: "10px", color: C.muted, marginTop: "2px" }}>{cl.name} · {fmtDate(task.due)}</div>
+                          </div>
+                          <button
+                            onClick={() => updateStatus(task.id, "active")}
+                            style={{ fontSize: "9px", color: C.muted, background: "none", border: `1px solid ${C.border}`, borderRadius: "4px", padding: "2px 7px", cursor: "pointer" }}
+                          >
+                            Rouvrir
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── RITUELS ── */}
+            {view === "rituels" && (
+              <div>
+                {/* Header card */}
+                <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "16px 20px", marginBottom: "18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontFamily: C.serif, fontSize: "15px", fontWeight: "700", color: C.navy }}>Anissa Lalahoum</div>
+                    <div style={{ fontSize: "11px", color: C.muted, marginTop: "2px" }}>5 rituels · réinitialisation à minuit</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontFamily: C.serif, fontSize: "30px", fontWeight: "700", color: "#9B5FC0", lineHeight: 1 }}>
+                      {ritualsDone.length}<span style={{ fontSize: "16px", color: C.muted }}>/{RITUALS.length}</span>
+                    </div>
+                    <div style={{ fontSize: "9px", color: C.muted, marginTop: "2px" }}>complétés</div>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div style={{ height: "2px", background: C.borderSoft, borderRadius: "2px", marginBottom: "18px", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${(ritualsDone.length / RITUALS.length) * 100}%`, background: "#9B5FC0", borderRadius: "2px", transition: "width 0.4s ease" }} />
+                </div>
+
+                {RITUALS.map(r => {
+                  const done = ritualsDone.includes(r.id);
+                  const isEx = ritualExpanded === r.id;
+                  return (
+                    <div
+                      key={r.id}
+                      style={{
+                        background: done ? "#FAFDF9" : C.surface,
+                        border: `1px solid ${done ? "#BBF7D0" : C.border}`,
+                        borderRadius: "8px", marginBottom: "6px",
+                        overflow: "hidden",
+                        borderLeft: `3px solid ${done ? C.green : "#9B5FC0"}`,
+                      }}
+                    >
+                      <div
+                        onClick={() => setRitualExpanded(isEx ? null : r.id)}
+                        style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: "12px", cursor: "pointer" }}
+                      >
+                        <div
+                          onClick={e => {
+                            e.stopPropagation();
+                            setRitualsDone(prev => {
+                              const updated = done ? prev.filter(x => x !== r.id) : [...prev, r.id];
+                              saveRitualsDone(updated);
+                              return updated;
+                            });
+                          }}
+                          style={{
+                            width: "19px", height: "19px", borderRadius: "50%", flexShrink: 0,
+                            border: `1.5px solid ${done ? C.green : "#9B5FC0"}`,
+                            background: done ? C.greenFaint : "transparent",
+                            display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                          }}
+                        >
+                          {done && <span style={{ fontSize: "11px", color: C.green }}>✓</span>}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: "13px", fontWeight: "600", color: done ? C.muted : C.navy, textDecoration: done ? "line-through" : "none" }}>
+                            {r.title}
+                          </div>
+                          <div style={{ fontSize: "10px", color: C.muted, marginTop: "2px" }}>{r.desc}</div>
+                        </div>
+                        <span style={{ fontSize: "9px", color: C.muted, display: "inline-block", transform: isEx ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
+                      </div>
+                      {isEx && (
+                        <div style={{ borderTop: `1px solid ${C.borderSoft}`, padding: "12px 16px", background: "#FDFCFB" }}>
+                          {r.steps.map((step, i) => (
+                            <div key={i} style={{ display: "flex", gap: "10px", marginBottom: "7px" }}>
+                              <span style={{ fontSize: "10px", color: "#9B5FC0", fontWeight: "700", flexShrink: 0, lineHeight: "1.6" }}>
+                                {String(i + 1).padStart(2, "0")}
+                              </span>
+                              <span style={{ fontSize: "12px", color: C.navy, lineHeight: "1.6" }}>{step}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── TIMELINE ── */}
+            {view === "timeline" && (
+              <div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "10px", marginBottom: "18px" }}>
+                  {days.map(day => {
+                    const isToday = day.toDateString() === TODAY.toDateString();
+                    const dayTasks = tasks.filter(t => t.due && new Date(t.due).toDateString() === day.toDateString());
+                    return (
+                      <div
+                        key={day.toISOString()}
+                        style={{
+                          background: isToday ? C.navyFaint : C.surface,
+                          border: `1px solid ${isToday ? C.navy + "28" : C.border}`,
+                          borderRadius: "10px", padding: "12px 10px", minHeight: "180px",
+                        }}
+                      >
+                        <div style={{ textAlign: "center", marginBottom: "12px" }}>
+                          <div style={{ fontSize: "8px", textTransform: "uppercase", letterSpacing: "0.12em", color: isToday ? C.blue : C.muted, fontWeight: "600" }}>
+                            {day.toLocaleDateString("fr-FR", { weekday: "short" })}
+                          </div>
+                          <div style={{ fontFamily: C.serif, fontSize: "24px", fontWeight: "700", color: isToday ? C.blue : C.navy, lineHeight: 1.1 }}>
+                            {day.getDate()}
+                          </div>
+                          <div style={{ fontSize: "9px", color: C.muted }}>{day.toLocaleDateString("fr-FR", { month: "short" })}</div>
+                          {isToday && <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: C.blue, margin: "4px auto 0" }} />}
+                        </div>
+                        {dayTasks.length === 0
+                          ? <div style={{ textAlign: "center", fontSize: "18px", color: C.borderSoft, marginTop: "10px" }}>·</div>
+                          : dayTasks.map(task => {
+                            const cl = clientById[task.client];
+                            return (
+                              <div key={task.id} style={{
+                                background: C.surface, border: `1px solid ${C.border}`,
+                                borderRadius: "6px", padding: "6px 8px", marginBottom: "5px",
+                                borderLeft: `3px solid ${cl.color}`,
+                              }}>
+                                <div style={{ fontSize: "10px", fontWeight: "600", color: C.navy, lineHeight: "1.3", marginBottom: "3px" }}>{task.title}</div>
+                                <div style={{ fontSize: "9px", color: C.muted }}>{cl.name}</div>
+                                <div style={{ marginTop: "4px" }}><StatusBadge status={task.status} small /></div>
+                              </div>
+                            );
+                          })
+                        }
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Tasks without date */}
+                {tasks.filter(t => !t.due && t.status !== "done").length > 0 && (
+                  <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "16px 18px" }}>
+                    <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "12px" }}>
+                      Sans date assignée
+                    </div>
+                    {tasks.filter(t => !t.due && t.status !== "done").map(task => {
+                      const cl = clientById[task.client];
+                      return (
+                        <div key={task.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
+                          <ClientDot id={task.client} />
+                          <span style={{ fontSize: "12px", color: C.navy, flex: 1 }}>{task.title}</span>
+                          <span style={{ fontSize: "10px", color: C.muted }}>{cl.name}</span>
+                          <StatusBadge status={task.status} small />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </main>
+        </div>
+      </div>
+
+      {/* ── QUICK ADD MODAL ──────────────────────────────────────── */}
+      {showModal && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget) closeModal(); }}
+          style={{
+            position: "fixed", inset: 0,
+            background: "rgba(26,26,46,0.38)", backdropFilter: "blur(5px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 200, padding: "20px",
+          }}
+        >
+          <div style={{
+            background: C.surface, borderRadius: "14px",
+            border: `1px solid ${C.border}`,
+            width: "100%", maxWidth: "540px",
+            boxShadow: "0 24px 64px rgba(26,26,46,0.18)",
+            overflow: "hidden",
+          }}>
+            {/* Modal header */}
+            <div style={{ padding: "18px 22px 16px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontFamily: C.serif, fontSize: "17px", fontWeight: "700", color: C.navy }}>Nouvelle mission</div>
+                <div style={{ fontSize: "11px", color: C.muted, marginTop: "2px" }}>L'IA reformule le titre et détaille les étapes</div>
+              </div>
+              <button onClick={closeModal} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "15px", color: C.muted, padding: "2px" }}>✕</button>
+            </div>
+
+            <div style={{ padding: "20px 22px" }}>
+              {/* Raw input */}
+              <div style={{ marginBottom: "14px" }}>
+                <label style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "7px" }}>
+                  Tâche brute
+                </label>
+                <input
+                  value={rawInput}
+                  onChange={e => { setRawInput(e.target.value); setAiResult(null); }}
+                  onKeyDown={e => e.key === "Enter" && generateWithAI()}
+                  placeholder="ex: newsletter mai vitamine s, setup tunnel retraite anissa..."
+                  disabled={aiLoading}
+                  style={{
+                    width: "100%", padding: "10px 14px",
+                    border: `1px solid ${C.border}`, borderRadius: "8px",
+                    fontSize: "13px", color: C.navy, background: C.bg,
+                    outline: "none", fontFamily: C.sans,
+                  }}
+                />
+              </div>
+
+              {/* Client selector */}
+              <div style={{ marginBottom: "18px" }}>
+                <label style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "7px" }}>
+                  Client
+                </label>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  {CLIENTS.map(cl => (
+                    <button
+                      key={cl.id}
+                      onClick={() => setAddClient(cl.id)}
+                      style={{
+                        padding: "7px 16px", borderRadius: "7px",
+                        border: `1px solid ${addClient === cl.id ? cl.color : C.border}`,
+                        background: addClient === cl.id ? cl.color + "12" : "transparent",
+                        color: addClient === cl.id ? cl.color : C.muted,
+                        fontSize: "12px", fontWeight: "600", cursor: "pointer",
+                        display: "flex", alignItems: "center", gap: "7px",
+                      }}
+                    >
+                      <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: cl.color, display: "inline-block" }} />
+                      {cl.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Generate */}
+              {!aiResult && (
+                <button
+                  className="hover-lift"
+                  onClick={generateWithAI}
+                  disabled={!rawInput.trim() || aiLoading}
+                  style={{
+                    width: "100%", padding: "11px",
+                    background: !rawInput.trim() || aiLoading ? "#E8E6E0" : C.navy,
+                    color: !rawInput.trim() || aiLoading ? C.muted : "#fff",
+                    border: "none", borderRadius: "8px",
+                    fontSize: "13px", fontWeight: "600", letterSpacing: "0.04em",
+                    cursor: !rawInput.trim() || aiLoading ? "default" : "pointer",
+                  }}
+                >
+                  {aiLoading ? "Génération en cours…" : "Générer avec l'IA →"}
+                </button>
+              )}
+
+              {aiError && (
+                <p style={{ fontSize: "12px", color: C.red, marginTop: "10px", textAlign: "center" }}>{aiError}</p>
+              )}
+
+              {/* AI Result */}
+              {aiResult && (
+                <div>
+                  <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "16px", marginBottom: "12px" }}>
+                    <div style={{ fontSize: "8px", letterSpacing: "0.14em", textTransform: "uppercase", color: C.blue, fontWeight: "600", marginBottom: "10px" }}>
+                      ✦ Généré par Claude
+                    </div>
+                    <div style={{ fontFamily: C.serif, fontSize: "15px", fontWeight: "700", color: C.navy, marginBottom: "8px", lineHeight: 1.3 }}>
+                      {aiResult.title}
+                    </div>
+                    <p style={{ fontSize: "12px", color: "#5A5855", lineHeight: "1.7", marginBottom: "14px", fontStyle: "italic", borderBottom: `1px solid ${C.borderSoft}`, paddingBottom: "12px" }}>
+                      {aiResult.description}
+                    </p>
+                    <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "10px" }}>Étapes</div>
+                    {aiResult.steps.map((step, i) => (
+                      <div key={i} style={{ display: "flex", gap: "10px", marginBottom: "7px" }}>
+                        <span style={{ fontSize: "10px", color: clientById[addClient]?.color, fontWeight: "700", flexShrink: 0, lineHeight: "1.6" }}>
+                          {String(i + 1).padStart(2, "0")}
+                        </span>
+                        <span style={{ fontSize: "12px", color: C.navy, lineHeight: "1.6" }}>{step}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      onClick={() => { setAiResult(null); }}
+                      style={{
+                        flex: "0 0 auto", padding: "10px 16px",
+                        border: `1px solid ${C.border}`, borderRadius: "8px",
+                        background: "transparent", color: C.muted,
+                        fontSize: "12px", cursor: "pointer",
+                      }}
+                    >
+                      Regénérer
+                    </button>
+                    <button
+                      className="hover-lift"
+                      onClick={saveTask}
+                      style={{
+                        flex: 1, padding: "10px",
+                        background: C.navy, color: "#fff",
+                        border: "none", borderRadius: "8px",
+                        fontSize: "12px", fontWeight: "600", letterSpacing: "0.04em", cursor: "pointer",
+                      }}
+                    >
+                      Sauvegarder la mission ✓
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
