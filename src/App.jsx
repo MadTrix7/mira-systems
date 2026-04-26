@@ -4,8 +4,6 @@ import { INITIAL_TASKS } from "./data/tasks";
 import { RITUALS } from "./data/rituals";
 import { saveTasks, loadTasks, saveRitualsDone, loadRitualsDone } from "./lib/storage";
 
-const API_URL = "https://mira-systems-api.matheo-vincnt.workers.dev";
-
 // ─── Design tokens ──────────────────────────────────────────────────────────
 const C = {
   bg: "#FAFAF8",
@@ -254,11 +252,12 @@ export default function App() {
   const [historyMonth, setHistoryMonth] = useState(ymKey(todayISO()));
 
   // Quick-add state
-  const [rawInput, setRawInput] = useState("");
+  const [newTitle, setNewTitle] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [newDue, setNewDue] = useState("");
+  const [newProject, setNewProject] = useState("");
+  const [newPriority, setNewPriority] = useState(null);
   const [addClient, setAddClient] = useState("vitamine-s");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState(null);
-  const [aiError, setAiError] = useState(null);
 
   // Filtered tasks
   const activeTasks = tasks.filter(t =>
@@ -347,54 +346,25 @@ export default function App() {
 
   function closeModal() {
     setShowModal(false);
-    setAiResult(null);
-    setRawInput("");
-    setAiError(null);
-  }
-
-  async function generateWithAI() {
-    if (!rawInput.trim() || aiLoading) return;
-    setAiLoading(true);
-    setAiError(null);
-    setAiResult(null);
-    const cl = clientById[addClient];
-    try {
-      const res = await fetch(`${API_URL}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rawInput,
-          clientName: cl.name,
-          clientType: cl.type,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        console.error("Generation failed:", res.status, data);
-        setAiError(`Erreur ${res.status} : ${data.error || "génération impossible"}`);
-        setAiLoading(false);
-        return;
-      }
-      setAiResult(data);
-    } catch (err) {
-      console.error("Generation network error:", err);
-      setAiError("Erreur réseau. Vérifie ta connexion et réessaie.");
-    }
-    setAiLoading(false);
+    setNewTitle("");
+    setNewDescription("");
+    setNewDue("");
+    setNewProject("");
+    setNewPriority(null);
   }
 
   function saveTask() {
-    if (!aiResult) return;
+    if (!newTitle.trim()) return;
     const newTask = {
       id: `task-${Date.now()}`,
       client: addClient,
       status: "upcoming",
-      due: null,
-      project: "Divers",
-      priority: null,
-      title: aiResult.title,
-      description: aiResult.description,
-      steps: aiResult.steps,
+      due: newDue || null,
+      project: newProject.trim() || "Divers",
+      priority: newPriority,
+      title: newTitle.trim(),
+      description: newDescription.trim(),
+      steps: [],
     };
     setTasks(prev => {
       const updated = [newTask, ...prev];
@@ -945,23 +915,21 @@ export default function App() {
             <div style={{ padding: "18px 22px 16px", borderBottom: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>
                 <div style={{ fontFamily: C.serif, fontSize: "17px", fontWeight: "700", color: C.navy }}>Nouvelle mission</div>
-                <div style={{ fontSize: "11px", color: C.muted, marginTop: "2px" }}>L'IA reformule le titre et détaille les étapes</div>
+                <div style={{ fontSize: "11px", color: C.muted, marginTop: "2px" }}>Renseigne les infos puis sauvegarde.</div>
               </div>
               <button onClick={closeModal} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "15px", color: C.muted, padding: "2px" }}>✕</button>
             </div>
 
             <div style={{ padding: "20px 22px" }}>
-              {/* Raw input */}
+              {/* Title */}
               <div style={{ marginBottom: "14px" }}>
                 <label style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "7px" }}>
-                  Tâche brute
+                  Titre *
                 </label>
                 <input
-                  value={rawInput}
-                  onChange={e => { setRawInput(e.target.value); setAiResult(null); }}
-                  onKeyDown={e => e.key === "Enter" && generateWithAI()}
-                  placeholder="ex: newsletter mai vitamine s, setup tunnel retraite anissa..."
-                  disabled={aiLoading}
+                  value={newTitle}
+                  onChange={e => setNewTitle(e.target.value)}
+                  placeholder="ex: Newsletter mensuelle Vitamine S"
                   style={{
                     width: "100%", padding: "10px 14px",
                     border: `1px solid ${C.border}`, borderRadius: "8px",
@@ -971,12 +939,31 @@ export default function App() {
                 />
               </div>
 
+              {/* Description */}
+              <div style={{ marginBottom: "14px" }}>
+                <label style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "7px" }}>
+                  Description
+                </label>
+                <textarea
+                  value={newDescription}
+                  onChange={e => setNewDescription(e.target.value)}
+                  placeholder="1 à 2 phrases sur l'objectif et le livrable"
+                  rows={2}
+                  style={{
+                    width: "100%", padding: "10px 14px",
+                    border: `1px solid ${C.border}`, borderRadius: "8px",
+                    fontSize: "13px", color: C.navy, background: C.bg,
+                    outline: "none", fontFamily: C.sans, resize: "vertical",
+                  }}
+                />
+              </div>
+
               {/* Client selector */}
-              <div style={{ marginBottom: "18px" }}>
+              <div style={{ marginBottom: "14px" }}>
                 <label style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "7px" }}>
                   Client
                 </label>
-                <div style={{ display: "flex", gap: "8px" }}>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                   {CLIENTS.map(cl => (
                     <button
                       key={cl.id}
@@ -997,80 +984,91 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Generate */}
-              {!aiResult && (
-                <button
-                  className="hover-lift"
-                  onClick={generateWithAI}
-                  disabled={!rawInput.trim() || aiLoading}
-                  style={{
-                    width: "100%", padding: "11px",
-                    background: !rawInput.trim() || aiLoading ? "#E8E6E0" : C.navy,
-                    color: !rawInput.trim() || aiLoading ? C.muted : "#fff",
-                    border: "none", borderRadius: "8px",
-                    fontSize: "13px", fontWeight: "600", letterSpacing: "0.04em",
-                    cursor: !rawInput.trim() || aiLoading ? "default" : "pointer",
-                  }}
-                >
-                  {aiLoading ? "Génération en cours…" : "Générer avec l'IA →"}
-                </button>
-              )}
-
-              {aiError && (
-                <p style={{ fontSize: "12px", color: C.red, marginTop: "10px", textAlign: "center" }}>{aiError}</p>
-              )}
-
-              {/* AI Result */}
-              {aiResult && (
+              {/* Project + Date row */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
                 <div>
-                  <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "16px", marginBottom: "12px" }}>
-                    <div style={{ fontSize: "8px", letterSpacing: "0.14em", textTransform: "uppercase", color: C.blue, fontWeight: "600", marginBottom: "10px" }}>
-                      ✦ Généré par Claude
-                    </div>
-                    <div style={{ fontFamily: C.serif, fontSize: "15px", fontWeight: "700", color: C.navy, marginBottom: "8px", lineHeight: 1.3 }}>
-                      {aiResult.title}
-                    </div>
-                    <p style={{ fontSize: "12px", color: "#5A5855", lineHeight: "1.7", marginBottom: "14px", fontStyle: "italic", borderBottom: `1px solid ${C.borderSoft}`, paddingBottom: "12px" }}>
-                      {aiResult.description}
-                    </p>
-                    <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "10px" }}>Étapes</div>
-                    {aiResult.steps.map((step, i) => (
-                      <div key={i} style={{ display: "flex", gap: "10px", marginBottom: "7px" }}>
-                        <span style={{ fontSize: "10px", color: clientById[addClient]?.color, fontWeight: "700", flexShrink: 0, lineHeight: "1.6" }}>
-                          {String(i + 1).padStart(2, "0")}
-                        </span>
-                        <span style={{ fontSize: "12px", color: C.navy, lineHeight: "1.6" }}>{step}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <button
-                      onClick={() => { setAiResult(null); }}
-                      style={{
-                        flex: "0 0 auto", padding: "10px 16px",
-                        border: `1px solid ${C.border}`, borderRadius: "8px",
-                        background: "transparent", color: C.muted,
-                        fontSize: "12px", cursor: "pointer",
-                      }}
-                    >
-                      Regénérer
-                    </button>
-                    <button
-                      className="hover-lift"
-                      onClick={saveTask}
-                      style={{
-                        flex: 1, padding: "10px",
-                        background: C.navy, color: "#fff",
-                        border: "none", borderRadius: "8px",
-                        fontSize: "12px", fontWeight: "600", letterSpacing: "0.04em", cursor: "pointer",
-                      }}
-                    >
-                      Sauvegarder la mission ✓
-                    </button>
-                  </div>
+                  <label style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "7px" }}>
+                    Projet
+                  </label>
+                  <input
+                    value={newProject}
+                    onChange={e => setNewProject(e.target.value)}
+                    placeholder="ex: Workflows"
+                    style={{
+                      width: "100%", padding: "10px 14px",
+                      border: `1px solid ${C.border}`, borderRadius: "8px",
+                      fontSize: "13px", color: C.navy, background: C.bg,
+                      outline: "none", fontFamily: C.sans,
+                    }}
+                  />
                 </div>
-              )}
+                <div>
+                  <label style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "7px" }}>
+                    Date prévue
+                  </label>
+                  <input
+                    type="date"
+                    value={newDue}
+                    onChange={e => setNewDue(e.target.value)}
+                    style={{
+                      width: "100%", padding: "9px 14px",
+                      border: `1px solid ${C.border}`, borderRadius: "8px",
+                      fontSize: "13px", color: C.navy, background: C.bg,
+                      outline: "none", fontFamily: C.sans,
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Priority */}
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "7px" }}>
+                  Priorité
+                </label>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={() => setNewPriority(null)}
+                    style={{
+                      padding: "7px 16px", borderRadius: "7px",
+                      border: `1px solid ${newPriority === null ? C.navy : C.border}`,
+                      background: newPriority === null ? C.navyFaint : "transparent",
+                      color: newPriority === null ? C.navy : C.muted,
+                      fontSize: "12px", fontWeight: "600", cursor: "pointer",
+                    }}
+                  >
+                    Normale
+                  </button>
+                  <button
+                    onClick={() => setNewPriority("urgent")}
+                    style={{
+                      padding: "7px 16px", borderRadius: "7px",
+                      border: `1px solid ${newPriority === "urgent" ? C.red : C.border}`,
+                      background: newPriority === "urgent" ? C.redFaint : "transparent",
+                      color: newPriority === "urgent" ? C.red : C.muted,
+                      fontSize: "12px", fontWeight: "600", cursor: "pointer",
+                    }}
+                  >
+                    Urgent
+                  </button>
+                </div>
+              </div>
+
+              {/* Save button */}
+              <button
+                className="hover-lift"
+                onClick={saveTask}
+                disabled={!newTitle.trim()}
+                style={{
+                  width: "100%", padding: "11px",
+                  background: !newTitle.trim() ? "#E8E6E0" : C.navy,
+                  color: !newTitle.trim() ? C.muted : "#fff",
+                  border: "none", borderRadius: "8px",
+                  fontSize: "13px", fontWeight: "600", letterSpacing: "0.04em",
+                  cursor: !newTitle.trim() ? "default" : "pointer",
+                }}
+              >
+                Créer la mission
+              </button>
             </div>
           </div>
         </div>
