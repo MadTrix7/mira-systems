@@ -4,7 +4,7 @@ import { INITIAL_TASKS } from "./data/tasks";
 import { RITUALS } from "./data/rituals";
 import { saveTasks, loadTasks, saveRitualsDone, loadRitualsDone } from "./lib/storage";
 
-const API_URL = "https://mira-systems-api.PLACEHOLDER.workers.dev";
+const API_URL = "https://mira-systems-api.matheo-vincnt.workers.dev";
 
 // ─── Design tokens ──────────────────────────────────────────────────────────
 const C = {
