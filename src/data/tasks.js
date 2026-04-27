@@ -3,44 +3,6 @@
 // priority : "urgent" | null
 
 export const INITIAL_TASKS = [
-  // ── Vitamine S ──────────────────────────────────────────────────────────
-  {
-    id: "vs-1",
-    client: "vitamine-s",
-    status: "active",
-    due: "2026-04-28",
-    project: "Newsletters",
-    priority: null,
-    title: "Newsletter mensuelle #4 — Vitamine S",
-    description:
-      "Rédiger et intégrer la newsletter d'avril. Thème : témoignage client et promo printemps.",
-    steps: [
-      "Brief avec Stéphanie sur le thème du mois",
-      "Rédiger le texte (300–400 mots)",
-      "Créer le visuel header sur Canva",
-      "Intégrer dans MailerLite",
-      "Envoyer le test à Stéphanie pour validation",
-      "Programmer l'envoi final",
-    ],
-  },
-  {
-    id: "vs-2",
-    client: "vitamine-s",
-    status: "done",
-    due: "2026-04-20",
-    project: "Social Media",
-    priority: null,
-    title: "Post Instagram — Projet Daxen Stand",
-    description:
-      "Caption et visuel pour le post de présentation du stand Daxen.",
-    steps: [
-      "Récupérer les photos du stand",
-      "Rédiger la caption storytelling client",
-      "Créer le carrousel Canva",
-      "Envoyer pour validation Stéphanie",
-    ],
-  },
-
   // ── Anissa Lalahoum — Phase 1 : Fondations GHL ──────────────────────────
   {
     id: "an-p1-1",
@@ -1185,6 +1147,160 @@ export const INITIAL_TASKS = [
       "Envoyer à Anissa pour feedback",
       "Ajuster format et KPIs si nécessaire",
       "Activer l'envoi automatique hebdomadaire",
+    ],
+  },
+
+  // ── Semaine 28-30 avril 2026 — additions ────────────────────────────────
+  // Mardi 28 avril
+  {
+    id: "an-p1-9",
+    client: "anissa",
+    status: "active",
+    due: "2026-04-28",
+    project: "Retraites",
+    priority: "urgent",
+    title: "Préparer questions session 1 — retraite mai",
+    description: "Cadrer le call de récupération matière retraite mai avec Anissa.",
+    steps: [
+      "Lister les questions clés (thème, promesse, transformation, format, prix, bonus)",
+      "Préparer une checklist verbatims/métaphores à capter",
+      "Tester l'enregistrement (Zoom + audio backup)",
+      "Envoyer l'agenda à Anissa la veille",
+    ],
+  },
+  {
+    id: "mira-1",
+    client: "anissa",
+    status: "active",
+    due: "2026-04-28",
+    project: "Maintenance",
+    priority: null,
+    title: "Backup base GHL avant migration tags",
+    description: "Snapshot complet de la base avant la migration des tags lifecycle.",
+    steps: [
+      "Export complet contacts + tags + custom fields → CSV",
+      "Stocker dans Drive privé Mira Systems",
+      "Documenter la date du snapshot",
+      "Vérifier que le restore est faisable (dry-run)",
+    ],
+  },
+
+  // Mercredi 29 avril
+  {
+    id: "an-p1-10",
+    client: "anissa",
+    status: "active",
+    due: "2026-04-29",
+    project: "GHL Setup",
+    priority: "urgent",
+    title: "Cleanup doublons contacts GHL",
+    description: "Nettoyer les doublons base GHL avant migration tags lifecycle.",
+    steps: [
+      "Exporter tous les contacts en CSV",
+      "Identifier les doublons par email puis par téléphone",
+      "Choisir la fiche maître (la plus récente, plus d'historique)",
+      "Fusionner via la fonction merge GHL",
+      "Re-vérifier les tags après merge",
+    ],
+  },
+  {
+    id: "an-p1-11",
+    client: "anissa",
+    status: "active",
+    due: "2026-04-29",
+    project: "Vortex",
+    priority: null,
+    title: "Lister replays Circle manquants",
+    description: "Cross-check planning Vortex 24 semaines vs replays uploadés.",
+    steps: [
+      "Récupérer le planning officiel des 24 semaines",
+      "Lister chaque replay attendu",
+      "Comparer avec ce qui est sur Circle",
+      "Documenter les manquants dans le tableau audit Vortex",
+      "Alerter Anissa des semaines incomplètes",
+    ],
+  },
+  {
+    id: "an-p1-12",
+    client: "anissa",
+    status: "active",
+    due: "2026-04-29",
+    project: "Stripe",
+    priority: null,
+    title: "Vérifier portail Stripe clientes Cercle",
+    description: "S'assurer que toutes les clientes Cercle accèdent au portail self-service.",
+    steps: [
+      "Activer le portail customer Stripe si pas déjà fait",
+      "Tester avec un compte cliente test",
+      "Préparer le lien type pour les emails (W4 + emails service)",
+      "Documenter dans la base Ressources",
+    ],
+  },
+  {
+    id: "mira-2",
+    client: "anissa",
+    status: "active",
+    due: "2026-04-29",
+    project: "Process",
+    priority: null,
+    title: "Sync stack outils — accès Stripe Alkia + GHL",
+    description: "Centraliser accès et credentials Mira Systems pour Anissa.",
+    steps: [
+      "Lister tous les comptes (Stripe Alkia, Stripe Anissa, GHL, MailerLite, Circle)",
+      "Stocker les accès dans 1Password partagé",
+      "Vérifier que Mathéo a accès à tout",
+      "Documenter le process de rotation mdp",
+    ],
+  },
+
+  // Jeudi 30 avril
+  {
+    id: "an-p1-13",
+    client: "anissa",
+    status: "active",
+    due: "2026-04-30",
+    project: "Process",
+    priority: "urgent",
+    title: "Brief Linda — objections retraite mai",
+    description: "Préparer Linda sur les objections probables campagne retraite mai.",
+    steps: [
+      "Lister les 6 objections les plus probables (prix, timing, contenu, doute spirituel, etc.)",
+      "Rédiger une réponse type pour chaque",
+      "Caller Linda 30 min pour la briefer",
+      "Documenter dans le doc closing partagé",
+    ],
+  },
+  {
+    id: "an-p1-14",
+    client: "anissa",
+    status: "active",
+    due: "2026-04-30",
+    project: "Retraites",
+    priority: "urgent",
+    title: "Draft email teaser retraite mai",
+    description: "Rédiger le 1er email d'annonce de la retraite digitale mai.",
+    steps: [
+      "Reprendre les verbatims d'Anissa (session 1)",
+      "Structurer : accroche → promesse → date → CTA inscription",
+      "Ton vouvoiement, signé L'Équipe Aleph Circle",
+      "Soumettre à Anissa pour validation",
+    ],
+  },
+  {
+    id: "an-p1-15",
+    client: "anissa",
+    status: "active",
+    due: "2026-04-30",
+    project: "GHL Setup",
+    priority: null,
+    title: "Importer CSV clientes actives Stripe → GHL",
+    description: "Tagger les 96 clientes actives en lifecycle:cliente-active + paiement:actif.",
+    steps: [
+      "Exporter la liste des subscribers actifs depuis Stripe",
+      "Mapper chaque ligne avec le contact GHL correspondant",
+      "Uploader le CSV via l'import GHL en mode tag-only",
+      "Retirer lifecycle:prospect des contacts importés",
+      "Vérifier sur 5 contacts au hasard",
     ],
   },
 ];
