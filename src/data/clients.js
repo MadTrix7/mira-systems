@@ -3,15 +3,6 @@
 
 export const CLIENTS = [
   {
-    id: "vitamine-s",
-    name: "Vitamine S",
-    short: "VS",
-    type: "Agence graphique",
-    color: "#C0533A",
-    contact: "Stéphanie",
-    location: "Portes-lès-Valence, Drôme",
-  },
-  {
     id: "anissa",
     name: "Anissa Lalahoum",
     short: "AL",

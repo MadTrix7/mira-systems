@@ -7,7 +7,35 @@ const KEYS = {
   TASKS: "mira_tasks",
   RITUALS_DONE: "mira_rituals_done",
   RITUALS_DATE: "mira_rituals_date",
+  PREFS: "mira_prefs",
 };
+
+// ── Preferences (theme, density, view, etc.) ─────────────────────────────────
+
+const DEFAULT_PREFS = {
+  theme: "light",        // "light" | "dark"
+  density: "comfy",      // "comfy" | "compact"
+  groupByProject: false, // missions view
+  sidebarCollapsed: true, // mobile-hidden by default; CSS media query controls desktop
+};
+
+export function loadPrefs() {
+  try {
+    const raw = localStorage.getItem(KEYS.PREFS);
+    if (!raw) return { ...DEFAULT_PREFS };
+    return { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+export function savePrefs(prefs) {
+  try {
+    localStorage.setItem(KEYS.PREFS, JSON.stringify(prefs));
+  } catch (e) {
+    console.warn("[Mira] Impossible de sauvegarder les préférences :", e);
+  }
+}
 
 // ── Tasks ────────────────────────────────────────────────────────────────────
 
@@ -19,11 +47,27 @@ export function saveTasks(tasks) {
   }
 }
 
-export function loadTasks(fallback) {
+export function loadTasks(fallback, validClientIds = null) {
   try {
     const raw = localStorage.getItem(KEYS.TASKS);
     if (!raw) return fallback;
-    return JSON.parse(raw);
+    let stored = JSON.parse(raw);
+    if (!Array.isArray(stored)) return fallback;
+    // Drop tasks whose client no longer exists (cleanup after client removal).
+    if (validClientIds) {
+      const before = stored.length;
+      stored = stored.filter((t) => validClientIds.includes(t.client));
+      if (stored.length !== before) {
+        localStorage.setItem(KEYS.TASKS, JSON.stringify(stored));
+      }
+    }
+    // Merge: new initial tasks added in code show up without wiping local edits.
+    const ids = new Set(stored.map((t) => t.id));
+    const missing = (fallback || []).filter((t) => !ids.has(t.id));
+    if (missing.length === 0) return stored;
+    const merged = [...stored, ...missing];
+    localStorage.setItem(KEYS.TASKS, JSON.stringify(merged));
+    return merged;
   } catch {
     return fallback;
   }

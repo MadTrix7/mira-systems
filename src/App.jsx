@@ -1,8 +1,92 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { CLIENTS, clientById } from "./data/clients";
 import { INITIAL_TASKS } from "./data/tasks";
 import { RITUALS } from "./data/rituals";
-import { saveTasks, loadTasks, saveRitualsDone, loadRitualsDone } from "./lib/storage";
+import { saveTasks, loadTasks, saveRitualsDone, loadRitualsDone, loadPrefs, savePrefs } from "./lib/storage";
+
+// ─── Templates de tâches ────────────────────────────────────────────────────
+const TASK_TEMPLATES = [
+  {
+    id: "tpl-audit-ghl",
+    label: "Audit GHL",
+    client: "anissa",
+    project: "GHL Setup",
+    title: "Audit GHL — [scope]",
+    description: "Auditer une zone GHL et documenter les écarts.",
+    steps: [
+      "Lister tags / workflows / funnels existants",
+      "Identifier les incohérences",
+      "Documenter dans tableau action",
+      "Proposer plan de remédiation",
+    ],
+  },
+  {
+    id: "tpl-workflow-ghl",
+    label: "Workflow GHL",
+    client: "anissa",
+    project: "Workflows",
+    title: "Workflow GHL — [nom]",
+    description: "Construire un workflow GHL bout en bout.",
+    steps: [
+      "Définir trigger + conditions",
+      "Lister actions et délais",
+      "Construire dans GHL",
+      "Tester avec contact test",
+      "Mettre en prod et documenter",
+    ],
+  },
+  {
+    id: "tpl-stripe-link",
+    label: "Lien Stripe",
+    client: "anissa",
+    project: "Stripe",
+    title: "Lien Stripe — [produit]",
+    description: "Créer ou maintenir un lien de paiement Stripe.",
+    steps: [
+      "Définir produit + prix + récurrence",
+      "Créer le payment link Stripe",
+      "Tester en mode sandbox",
+      "Sauvegarder le lien dans la base Ressources",
+    ],
+  },
+  {
+    id: "tpl-data-migration",
+    label: "Migration data",
+    client: "anissa",
+    project: "GHL Setup",
+    title: "Migration data — [source → cible]",
+    description: "Migrer une portion de données entre deux systèmes.",
+    steps: [
+      "Snapshot complet de la source",
+      "Mapper les champs source → cible",
+      "Importer en mode test",
+      "Vérifier 5 enregistrements aléatoires",
+      "Lancer l'import complet",
+      "Documenter le run",
+    ],
+  },
+];
+
+// ─── CSV export helper ──────────────────────────────────────────────────────
+function exportTasksToCSV(tasks) {
+  const cols = ["id", "client", "status", "due", "project", "priority", "title", "description"];
+  const escape = (v) => {
+    if (v === null || v === undefined) return "";
+    const s = String(v).replace(/"/g, '""');
+    return /[",\n]/.test(s) ? `"${s}"` : s;
+  };
+  const rows = [cols.join(",")];
+  tasks.forEach((t) => rows.push(cols.map((c) => escape(t[c])).join(",")));
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `mira-tasks-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 // ─── Design tokens ──────────────────────────────────────────────────────────
 const C = {
@@ -90,7 +174,31 @@ function StatusBadge({ status, small }) {
   );
 }
 
-function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring, onChangeDue, onChangeTitle }) {
+function TaskChip({ task, isDragging, onDragStart, onDragEnd }) {
+  const cl = clientById[task.client];
+  return (
+    <div
+      draggable
+      onDragStart={(e) => onDragStart(e, task.id)}
+      onDragEnd={onDragEnd}
+      title={`${task.title} — ${cl.name}${task.project ? " · " + task.project : ""}`}
+      style={{
+        fontSize: "9px", padding: "3px 6px", borderRadius: "3px",
+        background: C.surface,
+        borderLeft: `2px solid ${cl.color}`,
+        color: C.navy, lineHeight: "1.3",
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        cursor: "grab", opacity: isDragging ? 0.4 : 1,
+        userSelect: "none",
+      }}
+    >
+      {task.priority === "urgent" && <span style={{ color: C.red, fontWeight: "700", marginRight: "3px" }}>!</span>}
+      {task.title}
+    </div>
+  );
+}
+
+function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring, onChangeDue, onChangeTitle, onCheck, onDelete, onChangeNotes, onToggleStep, density = "comfy" }) {
   const cl = clientById[task.client];
   const isRecurring = task.recurring === "monthly";
   return (
@@ -105,26 +213,38 @@ function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring,
       {/* Row */}
       <div
         onClick={onToggle}
+        className="task-row"
         style={{ padding: "11px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: "12px" }}
       >
+        {onCheck && (
+          <div
+            onClick={(e) => { e.stopPropagation(); onCheck(); }}
+            title="Marquer comme livré"
+            className="task-check"
+            style={{
+              width: "20px", height: "20px", borderRadius: "5px",
+              border: `1.5px solid ${cl.color}55`,
+              background: C.surface, flexShrink: 0,
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transition: "border-color 0.12s, background 0.12s, transform 0.12s",
+            }}
+          />
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" }}>
             {task.priority === "urgent" && (
-              <span style={{ fontSize: "8px", padding: "1px 6px", borderRadius: "3px", background: C.redFaint, color: C.red, fontWeight: "700", letterSpacing: "0.08em" }}>
-                URGENT
-              </span>
+              <span title="Urgent" style={{ width: "5px", height: "5px", borderRadius: "50%", background: C.red, display: "inline-block", flexShrink: 0 }} />
             )}
-            {isRecurring && (
-              <span title="Tâche mensuelle récurrente" style={{ fontSize: "8px", padding: "1px 6px", borderRadius: "3px", background: C.violetFaint, color: C.violet, fontWeight: "700", letterSpacing: "0.08em" }}>
-                ↻ MENSUEL
-              </span>
-            )}
-            <span style={{ fontSize: "13px", fontWeight: "600", color: C.navy, letterSpacing: "-0.01em" }}>
+            <span className="task-title" style={{ fontSize: "13px", fontWeight: "600", color: C.navy, letterSpacing: "-0.01em" }}>
               {task.title}
             </span>
+            {isRecurring && (
+              <span title="Mensuel récurrent" style={{ fontSize: "10px", color: C.violet }}>↻</span>
+            )}
           </div>
-          <div style={{ fontSize: "10px", color: C.muted, marginTop: "3px" }}>
-            {cl.name} &middot; {task.project}
+          <div className="task-meta" style={{ fontSize: "10px", color: C.muted, marginTop: "3px" }}>
+            {task.project}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
@@ -157,15 +277,67 @@ function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring,
           <p style={{ fontSize: "12px", color: "#4A4845", lineHeight: "1.7", marginBottom: "14px", fontStyle: "italic" }}>
             {task.description}
           </p>
-          <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "9px" }}>Étapes</div>
-          {task.steps.map((step, i) => (
-            <div key={i} style={{ display: "flex", gap: "10px", marginBottom: "7px", alignItems: "flex-start" }}>
-              <span style={{ fontSize: "10px", color: cl.color, fontWeight: "700", flexShrink: 0, lineHeight: "1.6" }}>
-                {String(i + 1).padStart(2, "0")}
-              </span>
-              <span style={{ fontSize: "12px", color: C.navy, lineHeight: "1.6" }}>{step}</span>
+          {task.steps && task.steps.length > 0 && (() => {
+            const stepsDone = Array.isArray(task.stepsDone) ? task.stepsDone : [];
+            const total = task.steps.length;
+            const doneCount = stepsDone.length;
+            return (
+              <div style={{ marginBottom: "12px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "9px" }}>
+                  <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted }}>
+                    Étapes
+                  </div>
+                  <div style={{ fontSize: "9px", color: C.muted }}>
+                    {doneCount} / {total}
+                  </div>
+                </div>
+                {total > 0 && (
+                  <div style={{ height: "2px", background: C.borderSoft, borderRadius: "2px", marginBottom: "9px", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${(doneCount / total) * 100}%`, background: cl.color, transition: "width 0.3s" }} />
+                  </div>
+                )}
+                {task.steps.map((step, i) => {
+                  const done = stepsDone.includes(i);
+                  return (
+                    <div key={i} style={{ display: "flex", gap: "10px", marginBottom: "7px", alignItems: "flex-start" }}>
+                      <div
+                        onClick={(e) => { e.stopPropagation(); onToggleStep && onToggleStep(i); }}
+                        style={{
+                          width: "14px", height: "14px", borderRadius: "3px",
+                          border: `1.5px solid ${done ? cl.color : C.border}`,
+                          background: done ? cl.color : "transparent",
+                          flexShrink: 0, marginTop: "2px",
+                          cursor: onToggleStep ? "pointer" : "default",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}
+                      >
+                        {done && <span style={{ fontSize: "9px", color: "#fff", fontWeight: "700", lineHeight: 1 }}>✓</span>}
+                      </div>
+                      <span style={{ fontSize: "12px", color: done ? C.muted : C.navy, lineHeight: "1.6", textDecoration: done ? "line-through" : "none" }}>{step}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+          {onChangeNotes && (
+            <div style={{ marginBottom: "12px" }}>
+              <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "5px" }}>Notes</div>
+              <textarea
+                value={task.notes || ""}
+                onChange={(e) => onChangeNotes(e.target.value)}
+                placeholder="Notes libres, blocages, infos client…"
+                rows={2}
+                style={{
+                  width: "100%", fontSize: "12px",
+                  padding: "7px 10px", borderRadius: "6px",
+                  border: `1px solid ${C.border}`, background: C.surface,
+                  color: C.navy, fontFamily: C.sans, resize: "vertical",
+                  outline: "none",
+                }}
+              />
             </div>
-          ))}
+          )}
           <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: `1px solid ${C.borderSoft}`, display: "flex", gap: "6px", flexWrap: "wrap" }}>
             <span style={{ fontSize: "9px", color: C.muted, letterSpacing: "0.08em", alignSelf: "center", marginRight: "4px" }}>STATUT :</span>
             {Object.entries(STATUS).map(([key, val]) => (
@@ -234,6 +406,25 @@ function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring,
               ✓ Livré le {new Date(task.doneAt).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
             </div>
           )}
+          {onDelete && (
+            <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: `1px solid ${C.borderSoft}`, display: "flex", justifyContent: "flex-end" }}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (confirm(`Supprimer "${task.title}" ?`)) onDelete();
+                }}
+                style={{
+                  fontSize: "9px", letterSpacing: "0.08em",
+                  color: C.red, background: "none",
+                  border: `1px solid ${C.redFaint}`,
+                  borderRadius: "4px", padding: "4px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                ✕ Supprimer
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -242,9 +433,10 @@ function TaskCard({ task, expanded, onToggle, onStatusChange, onToggleRecurring,
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [view, setView] = useState("missions");
+  const [view, setView] = useState("aujourd-hui");
   const [filter, setFilter] = useState("all");
-  const [tasks, setTasks] = useState(() => loadTasks(INITIAL_TASKS));
+  const [statusFilter, setStatusFilter] = useState("all"); // all|active|review|upcoming|urgent|overdue
+  const [tasks, setTasks] = useState(() => loadTasks(INITIAL_TASKS, CLIENTS.map(c => c.id)));
   const [expanded, setExpanded] = useState(null);
   const [ritualsDone, setRitualsDone] = useState(() => loadRitualsDone());
   const [ritualExpanded, setRitualExpanded] = useState(null);
@@ -253,6 +445,45 @@ export default function App() {
   const [calendarMonth, setCalendarMonth] = useState(ymKey(todayISO()));
   const [draggingId, setDraggingId] = useState(null);
   const [dragOverDate, setDragOverDate] = useState(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [undo, setUndo] = useState(null); // { snapshot, label }
+  const [prefs, setPrefs] = useState(() => loadPrefs());
+  const [reorderDragId, setReorderDragId] = useState(null);
+  const [reorderOverId, setReorderOverId] = useState(null);
+  const undoTimerRef = useRef(null);
+
+  // Persist prefs whenever they change
+  useEffect(() => { savePrefs(prefs); }, [prefs]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function onKey(e) {
+      const isInput = ["INPUT", "TEXTAREA"].includes(e.target.tagName) || e.target.isContentEditable;
+      // Cmd/Ctrl+K → search
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+      if (isInput) return;
+      // / → search
+      if (e.key === "/") { e.preventDefault(); setSearchOpen(true); return; }
+      // n → new task
+      if (e.key === "n") { e.preventDefault(); setShowModal(true); return; }
+      // esc → close any modal
+      if (e.key === "Escape") {
+        if (searchOpen) setSearchOpen(false);
+        if (showModal) setShowModal(false);
+        if (expanded) setExpanded(null);
+        return;
+      }
+      // g h / g k / g a → navigate
+      // (skipped — keep simple)
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [searchOpen, showModal, expanded]);
 
   // Quick-add state
   const [newTitle, setNewTitle] = useState("");
@@ -260,16 +491,50 @@ export default function App() {
   const [newDue, setNewDue] = useState("");
   const [newProject, setNewProject] = useState("");
   const [newPriority, setNewPriority] = useState(null);
-  const [addClient, setAddClient] = useState("vitamine-s");
+  const [addClient, setAddClient] = useState("anissa");
+  const [newSteps, setNewSteps] = useState([]);
+
+  // Derived counts (overdue, urgent, today, week)
+  const counts = useMemo(() => {
+    const today = todayISO();
+    const overdue = tasks.filter(t => t.status !== "done" && t.due && t.due < today).length;
+    const urgent = tasks.filter(t => t.status !== "done" && t.priority === "urgent").length;
+    const todayCount = tasks.filter(t => t.status !== "done" && t.due === today).length;
+    const week = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 7);
+      const limit = d.toISOString().slice(0, 10);
+      return tasks.filter(t => t.status !== "done" && t.due && t.due >= today && t.due <= limit).length;
+    })();
+    return { overdue, urgent, today: todayCount, week };
+  }, [tasks]);
 
   // Filtered tasks
-  const activeTasks = tasks.filter(t =>
-    t.status !== "done" && (filter === "all" || t.client === filter)
-  );
+  const activeTasks = tasks.filter(t => {
+    if (t.status === "done") return false;
+    if (filter !== "all" && t.client !== filter) return false;
+    if (statusFilter === "urgent") return t.priority === "urgent";
+    if (statusFilter === "overdue") return t.due && t.due < todayISO();
+    if (statusFilter !== "all" && t.status !== statusFilter) return false;
+    return true;
+  });
   const doneTasks = tasks.filter(t =>
     t.status === "done" && (filter === "all" || t.client === filter)
   );
   const taskCount = { active: tasks.filter(t => t.status === "active").length, done: tasks.filter(t => t.status === "done").length };
+
+  // Search results
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    return tasks.filter(t =>
+      (t.title || "").toLowerCase().includes(q) ||
+      (t.project || "").toLowerCase().includes(q) ||
+      (t.description || "").toLowerCase().includes(q) ||
+      (t.notes || "").toLowerCase().includes(q) ||
+      (clientById[t.client]?.name || "").toLowerCase().includes(q)
+    ).slice(0, 30);
+  }, [searchQuery, tasks]);
 
   // Timeline — next 7 days
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -347,6 +612,78 @@ export default function App() {
     });
   }
 
+  function updateNotes(id, notes) {
+    setTasks(prev => {
+      const updated = prev.map(t => t.id === id ? { ...t, notes } : t);
+      saveTasks(updated);
+      return updated;
+    });
+  }
+
+  function toggleStep(id, idx) {
+    setTasks(prev => {
+      const updated = prev.map(t => {
+        if (t.id !== id) return t;
+        const cur = Array.isArray(t.stepsDone) ? t.stepsDone : [];
+        const next = cur.includes(idx) ? cur.filter(i => i !== idx) : [...cur, idx];
+        return { ...t, stepsDone: next };
+      });
+      saveTasks(updated);
+      return updated;
+    });
+  }
+
+  function deleteTask(id) {
+    setTasks(prev => {
+      const snapshot = prev;
+      const updated = prev.filter(t => t.id !== id);
+      saveTasks(updated);
+      const target = prev.find(t => t.id === id);
+      pushUndo(snapshot, `Tâche supprimée : ${target?.title || ""}`);
+      return updated;
+    });
+    setExpanded(null);
+  }
+
+  function pushUndo(snapshot, label) {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setUndo({ snapshot, label });
+    undoTimerRef.current = setTimeout(() => setUndo(null), 6000);
+  }
+
+  function applyUndo() {
+    if (!undo) return;
+    setTasks(undo.snapshot);
+    saveTasks(undo.snapshot);
+    setUndo(null);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+  }
+
+  // Wrap updateStatus to push undo when marking done
+  function updateStatusWithUndo(id, status) {
+    if (status === "done") {
+      const snapshot = tasks;
+      const target = tasks.find(t => t.id === id);
+      pushUndo(snapshot, `Livré : ${target?.title || ""}`);
+    }
+    updateStatus(id, status);
+  }
+
+  function reorderTasks(dragId, overId) {
+    if (!dragId || !overId || dragId === overId) return;
+    setTasks(prev => {
+      const ids = prev.map(t => t.id);
+      const dragIdx = ids.indexOf(dragId);
+      const overIdx = ids.indexOf(overId);
+      if (dragIdx < 0 || overIdx < 0) return prev;
+      const updated = [...prev];
+      const [moved] = updated.splice(dragIdx, 1);
+      updated.splice(overIdx, 0, moved);
+      saveTasks(updated);
+      return updated;
+    });
+  }
+
   function closeModal() {
     setShowModal(false);
     setNewTitle("");
@@ -354,6 +691,7 @@ export default function App() {
     setNewDue("");
     setNewProject("");
     setNewPriority(null);
+    setNewSteps([]);
   }
 
   function saveTask() {
@@ -367,7 +705,9 @@ export default function App() {
       priority: newPriority,
       title: newTitle.trim(),
       description: newDescription.trim(),
-      steps: [],
+      steps: newSteps,
+      stepsDone: [],
+      notes: "",
     };
     setTasks(prev => {
       const updated = [newTask, ...prev];
@@ -377,7 +717,7 @@ export default function App() {
     closeModal();
   }
 
-  const navBtn = (id, label, icon) => (
+  const navBtn = (id, label, icon, badge) => (
     <button
       key={id}
       onClick={() => setView(id)}
@@ -391,7 +731,17 @@ export default function App() {
       }}
     >
       <span style={{ fontSize: "11px", opacity: 0.6 }}>{icon}</span>
-      {label}
+      <span style={{ flex: 1 }}>{label}</span>
+      {badge && badge.value > 0 && (
+        <span style={{
+          fontSize: "9px", padding: "1px 6px", borderRadius: "10px",
+          background: badge.color || C.navyFaint,
+          color: badge.fg || C.navy,
+          fontWeight: "700", minWidth: "16px", textAlign: "center",
+        }}>
+          {badge.value}
+        </span>
+      )}
     </button>
   );
 
@@ -426,12 +776,27 @@ export default function App() {
         .hover-lift:hover { transform: translateY(-1px); opacity: 0.9; }
         .hover-lift { transition: transform 0.15s ease, opacity 0.15s ease; }
         input:focus { outline: 2px solid ${C.navy}40 !important; }
+        .task-check:hover { border-color: ${C.green} !important; background: ${C.greenFaint} !important; }
+        .task-check:hover::after { content: "✓"; font-size: 11px; color: ${C.green}; font-weight: 700; }
+        .cal-cell:hover .cell-add-btn { opacity: 1; }
+        .cell-add-btn:hover { background: ${C.surface}; color: ${C.navy} !important; }
+        .density-compact .task-row { padding: 6px 14px !important; gap: 9px !important; }
+        .density-compact .task-row .task-meta { display: none; }
+        .density-compact .task-row .task-title { font-size: 12px !important; }
+        .density-compact main { padding: 14px 18px !important; }
+        @media (max-width: 720px) {
+          aside.sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 100; transform: translateX(-100%); transition: transform 0.2s; }
+          aside.sidebar.open { transform: translateX(0); }
+          .mobile-burger { display: inline-flex !important; }
+          .kanban-grid { grid-template-columns: 1fr !important; }
+          .stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
+        }
       `}</style>
 
-      <div style={{ display: "flex", height: "100vh", overflow: "hidden", fontFamily: C.sans, background: C.bg }}>
+      <div className={prefs.density === "compact" ? "density-compact" : ""} style={{ display: "flex", height: "100vh", overflow: "hidden", fontFamily: C.sans, background: C.bg }}>
 
         {/* ── SIDEBAR ─────────────────────────────────────────────── */}
-        <aside style={{ width: "210px", flexShrink: 0, background: C.surface, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column" }}>
+        <aside className={`sidebar ${prefs.sidebarCollapsed ? "" : "open"}`} style={{ width: "210px", flexShrink: 0, background: C.surface, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column" }}>
           {/* Brand */}
           <div style={{ padding: "18px 16px 14px", borderBottom: `1px solid ${C.borderSoft}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -439,43 +804,59 @@ export default function App() {
               <span style={{ fontFamily: C.serif, fontSize: "15px", fontWeight: "700", color: C.navy }}>Mira Systems</span>
             </div>
             <div style={{ fontSize: "9px", letterSpacing: "0.14em", color: C.muted, marginTop: "2px", paddingLeft: "14px" }}>
-              GESTION CLIENT
+              AUTOMATISATION & TECH
             </div>
           </div>
 
           {/* Nav */}
-          <div style={{ padding: "12px 8px 4px" }}>
-            <div style={{ fontSize: "8px", letterSpacing: "0.14em", color: C.muted, padding: "0 6px", marginBottom: "5px", textTransform: "uppercase" }}>Vue</div>
-            {navBtn("missions",   "Missions",          "◈")}
-            {navBtn("rituels",    "Rituels — Anissa",  "↺")}
-            {navBtn("timeline",   "Timeline 7 jours",  "▦")}
+          <div style={{ padding: "16px 8px 4px" }}>
+            {navBtn("aujourd-hui","Aujourd'hui",       "★", counts.today > 0 ? { value: counts.today, color: C.navyFaint, fg: C.navy } : null)}
+            {navBtn("missions",   "Missions",          "◈", counts.overdue > 0 ? { value: counts.overdue, color: C.redFaint, fg: C.red } : null)}
+            {navBtn("kanban",     "Kanban",            "▥")}
             {navBtn("calendrier", "Calendrier",        "▤")}
             {navBtn("historique", "Historique",        "❒")}
-            {navBtn("archive",    "Archive",           "▣")}
+            {navBtn("rituels",    "Rituels",           "↺")}
           </div>
 
-          <div style={{ padding: "10px 8px 4px" }}>
-            <div style={{ fontSize: "8px", letterSpacing: "0.14em", color: C.muted, padding: "0 6px", marginBottom: "5px", textTransform: "uppercase" }}>Clients</div>
-            {filterBtn("all", "Tous", <span style={{ fontSize: "8px", color: C.muted }}>●</span>)}
-            {CLIENTS.map(cl => filterBtn(cl.id, cl.name,
-              <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: cl.color, display: "inline-block", flexShrink: 0 }} />
-            ))}
-          </div>
-
-          {/* Stats */}
-          <div style={{ marginTop: "auto", borderTop: `1px solid ${C.borderSoft}`, padding: "14px 12px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "7px" }}>
-              {[
-                { label: "Actives",  val: taskCount.active, color: C.blue },
-                { label: "Livrées",  val: taskCount.done,   color: C.green },
-                { label: "Clients",  val: CLIENTS.length,   color: C.navy },
-                { label: "Rituels",  val: RITUALS.length,   color: "#9B5FC0" },
-              ].map(s => (
-                <div key={s.label} style={{ background: C.bg, borderRadius: "7px", padding: "9px 10px" }}>
-                  <div style={{ fontFamily: C.serif, fontSize: "20px", fontWeight: "700", color: s.color, lineHeight: 1 }}>{s.val}</div>
-                  <div style={{ fontSize: "9px", color: C.muted, marginTop: "3px" }}>{s.label}</div>
-                </div>
-              ))}
+          {/* Footer — search shortcut + settings */}
+          <div style={{ marginTop: "auto", borderTop: `1px solid ${C.borderSoft}`, padding: "12px" }}>
+            <button
+              onClick={() => setSearchOpen(true)}
+              title="Rechercher (⌘K)"
+              style={{
+                width: "100%", fontSize: "11px", padding: "8px 10px", borderRadius: "6px",
+                border: `1px solid ${C.border}`, background: "transparent",
+                color: C.muted, cursor: "pointer", textAlign: "left",
+                display: "flex", alignItems: "center", gap: "8px",
+              }}
+            >
+              <span style={{ opacity: 0.6 }}>⌕</span>
+              <span style={{ flex: 1 }}>Rechercher</span>
+              <span style={{ fontSize: "9px", padding: "1px 5px", borderRadius: "3px", background: C.bg, color: C.muted, letterSpacing: "0.05em" }}>⌘K</span>
+            </button>
+            <div style={{ display: "flex", gap: "5px", marginTop: "6px" }}>
+              <button
+                onClick={() => setPrefs(p => ({ ...p, density: p.density === "compact" ? "comfy" : "compact" }))}
+                title={`Densité : ${prefs.density === "compact" ? "compact" : "confort"}`}
+                style={{
+                  flex: 1, fontSize: "10px", padding: "5px 8px", borderRadius: "5px",
+                  border: `1px solid ${C.border}`, background: "transparent",
+                  color: C.muted, cursor: "pointer",
+                }}
+              >
+                {prefs.density === "compact" ? "Compact" : "Confort"}
+              </button>
+              <button
+                onClick={() => exportTasksToCSV(tasks)}
+                title="Export CSV"
+                style={{
+                  flex: 1, fontSize: "10px", padding: "5px 8px", borderRadius: "5px",
+                  border: `1px solid ${C.border}`, background: "transparent",
+                  color: C.muted, cursor: "pointer",
+                }}
+              >
+                Export CSV
+              </button>
             </div>
           </div>
         </aside>
@@ -485,10 +866,26 @@ export default function App() {
 
           {/* Header */}
           <header style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: "14px 24px", display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
+            <button
+              className="mobile-burger"
+              onClick={() => setPrefs(p => ({ ...p, sidebarCollapsed: !p.sidebarCollapsed }))}
+              style={{
+                display: "none", alignItems: "center", justifyContent: "center",
+                width: "32px", height: "32px", borderRadius: "6px",
+                border: `1px solid ${C.border}`, background: "transparent",
+                cursor: "pointer", fontSize: "14px", color: C.navy,
+                padding: 0, lineHeight: 1,
+              }}
+              title="Menu"
+            >
+              ☰
+            </button>
             <div style={{ flex: 1 }}>
               <h1 style={{ fontFamily: C.serif, fontSize: "19px", fontWeight: "700", color: C.navy, lineHeight: 1.2 }}>
                 {{
+                  "aujourd-hui": "Aujourd'hui",
                   missions: "Missions",
+                  kanban: "Kanban",
                   rituels: "Rituels quotidiens — Anissa",
                   timeline: "Timeline — 7 prochains jours",
                   calendrier: "Calendrier — drag & drop",
@@ -496,21 +893,8 @@ export default function App() {
                   archive: "Archive",
                 }[view]}
               </h1>
-              <p style={{ fontSize: "11px", color: C.muted, marginTop: "2px" }}>
-                {view === "missions"
-                  ? `${activeTasks.length} mission${activeTasks.length !== 1 ? "s" : ""} en cours`
-                  : view === "rituels"
-                  ? `${ritualsDone.length} / ${RITUALS.length} complétés aujourd'hui`
-                  : view === "timeline"
-                  ? "Les 7 prochains jours"
-                  : view === "calendrier"
-                  ? "Glisse une tâche pour la replacer dans le mois"
-                  : view === "historique"
-                  ? `${doneTasks.length} tâche${doneTasks.length !== 1 ? "s" : ""} livrée${doneTasks.length !== 1 ? "s" : ""} au total`
-                  : `${doneTasks.length} tâche${doneTasks.length !== 1 ? "s" : ""} archivée${doneTasks.length !== 1 ? "s" : ""}`}
-              </p>
             </div>
-            {view === "missions" && (
+            {(view === "missions" || view === "aujourd-hui" || view === "kanban") && (
               <button
                 className="hover-lift"
                 onClick={() => setShowModal(true)}
@@ -523,7 +907,7 @@ export default function App() {
                 }}
               >
                 <span style={{ fontSize: "15px", lineHeight: 1 }}>+</span>
-                Ajouter via IA
+                Ajouter une tâche
               </button>
             )}
           </header>
@@ -534,32 +918,81 @@ export default function App() {
             {/* ── MISSIONS ── */}
             {view === "missions" && (
               <div>
-                {(["active", "review", "upcoming"] ).map(st => {
-                  const group = activeTasks.filter(t => t.status === st);
-                  if (!group.length) return null;
-                  const s = STATUS[st];
-                  return (
-                    <div key={st} style={{ marginBottom: "26px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "11px" }}>
-                        <StatusBadge status={st} />
-                        <div style={{ flex: 1, height: "1px", background: C.borderSoft }} />
-                        <span style={{ fontSize: "10px", color: C.muted }}>{group.length}</span>
+                {/* Filters bar */}
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "18px" }}>
+                  {[
+                    { id: "all", label: "Toutes" },
+                    { id: "urgent", label: "Urgent", color: C.red, faint: C.redFaint },
+                    { id: "overdue", label: "En retard", color: C.red, faint: C.redFaint },
+                  ].map(p => {
+                    const sel = statusFilter === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => setStatusFilter(p.id)}
+                        style={{
+                          fontSize: "11px", padding: "5px 12px", borderRadius: "20px",
+                          border: `1px solid ${sel ? (p.color || C.navy) : C.border}`,
+                          background: sel ? (p.faint || C.navyFaint) : "transparent",
+                          color: sel ? (p.color || C.navy) : C.muted,
+                          cursor: "pointer", letterSpacing: "0.04em",
+                          fontWeight: sel ? "600" : "400",
+                        }}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {(() => {
+                  const groups = ["active", "review", "upcoming"].map(st => ({
+                    key: st, status: st, items: activeTasks.filter(t => t.status === st),
+                  }));
+                  return groups.map(g => {
+                    if (!g.items.length) return null;
+                    return (
+                      <div key={g.key} style={{ marginBottom: "26px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "11px" }}>
+                          <StatusBadge status={g.status} />
+                          <div style={{ flex: 1, height: "1px", background: C.borderSoft }} />
+                          <span style={{ fontSize: "10px", color: C.muted }}>{g.items.length}</span>
+                        </div>
+                        {g.items.map(task => (
+                          <div
+                            key={task.id}
+                            draggable
+                            onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", task.id); setReorderDragId(task.id); }}
+                            onDragOver={(e) => { e.preventDefault(); if (reorderOverId !== task.id) setReorderOverId(task.id); }}
+                            onDrop={(e) => { e.preventDefault(); reorderTasks(reorderDragId, task.id); setReorderDragId(null); setReorderOverId(null); }}
+                            onDragEnd={() => { setReorderDragId(null); setReorderOverId(null); }}
+                            style={{
+                              opacity: reorderDragId === task.id ? 0.4 : 1,
+                              outline: reorderOverId === task.id && reorderDragId !== task.id ? `2px dashed ${C.navy}` : "none",
+                              outlineOffset: "-2px",
+                              borderRadius: "8px",
+                            }}
+                          >
+                            <TaskCard
+                              task={task}
+                              expanded={expanded === task.id}
+                              onToggle={() => setExpanded(expanded === task.id ? null : task.id)}
+                              onStatusChange={(s) => updateStatusWithUndo(task.id, s)}
+                              onToggleRecurring={() => updateRecurring(task.id)}
+                              onChangeDue={(d) => updateDue(task.id, d)}
+                              onChangeTitle={(t) => updateTitle(task.id, t)}
+                              onChangeNotes={(n) => updateNotes(task.id, n)}
+                              onToggleStep={(i) => toggleStep(task.id, i)}
+                              onCheck={() => updateStatusWithUndo(task.id, "done")}
+                              onDelete={() => deleteTask(task.id)}
+                              density={prefs.density}
+                            />
+                          </div>
+                        ))}
                       </div>
-                      {group.map(task => (
-                        <TaskCard
-                          key={task.id}
-                          task={task}
-                          expanded={expanded === task.id}
-                          onToggle={() => setExpanded(expanded === task.id ? null : task.id)}
-                          onStatusChange={(s) => updateStatus(task.id, s)}
-                          onToggleRecurring={() => updateRecurring(task.id)}
-                          onChangeDue={(d) => updateDue(task.id, d)}
-                          onChangeTitle={(t) => updateTitle(task.id, t)}
-                        />
-                      ))}
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
 
                 {doneTasks.length > 0 && (
                   <div>
@@ -599,6 +1032,167 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {/* ── AUJOURD'HUI ── */}
+            {view === "aujourd-hui" && (() => {
+              const today = todayISO();
+              const overdue = tasks.filter(t => t.status !== "done" && t.due && t.due < today && (filter === "all" || t.client === filter));
+              const dueToday = tasks.filter(t => t.status !== "done" && t.due === today && (filter === "all" || t.client === filter));
+              const upcoming7 = (() => {
+                const d = new Date(); d.setDate(d.getDate() + 7);
+                const limit = d.toISOString().slice(0, 10);
+                return tasks.filter(t => t.status !== "done" && t.due && t.due > today && t.due <= limit && (filter === "all" || t.client === filter));
+              })();
+              const undated = tasks.filter(t => t.status !== "done" && !t.due && (filter === "all" || t.client === filter));
+              const sections = [
+                { title: "En retard", color: C.red, faint: C.redFaint, items: overdue },
+                { title: "Aujourd'hui", color: C.blue, faint: C.blueFaint, items: dueToday },
+                { title: "7 prochains jours", color: C.violet, faint: C.violetFaint, items: upcoming7 },
+                { title: "Sans date", color: C.muted, faint: C.bg, items: undated },
+              ];
+              const renderTask = (task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  expanded={expanded === task.id}
+                  onToggle={() => setExpanded(expanded === task.id ? null : task.id)}
+                  onStatusChange={(s) => updateStatusWithUndo(task.id, s)}
+                  onToggleRecurring={() => updateRecurring(task.id)}
+                  onChangeDue={(d) => updateDue(task.id, d)}
+                  onChangeTitle={(t) => updateTitle(task.id, t)}
+                  onChangeNotes={(n) => updateNotes(task.id, n)}
+                  onToggleStep={(i) => toggleStep(task.id, i)}
+                  onCheck={() => updateStatusWithUndo(task.id, "done")}
+                  onDelete={() => deleteTask(task.id)}
+                />
+              );
+              return (
+                <div>
+                  {/* Hero numbers */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", marginBottom: "24px" }}>
+                    {[
+                      { label: "En retard",   val: overdue.length,    color: overdue.length > 0 ? C.red : C.muted },
+                      { label: "Aujourd'hui", val: dueToday.length,   color: C.blue },
+                      { label: "7 jours",     val: upcoming7.length,  color: C.violet },
+                    ].map(s => (
+                      <div key={s.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "16px 18px" }}>
+                        <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "6px" }}>{s.label}</div>
+                        <div style={{ fontFamily: C.serif, fontSize: "34px", fontWeight: "700", color: s.color, lineHeight: 1 }}>{s.val}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {sections.map(s => (
+                    s.items.length === 0 ? null : (
+                      <div key={s.title} style={{ marginBottom: "26px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "11px" }}>
+                          <span style={{ fontSize: "9px", padding: "2px 9px", borderRadius: "20px", background: s.faint, color: s.color, fontWeight: "600", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                            {s.title}
+                          </span>
+                          <div style={{ flex: 1, height: "1px", background: C.borderSoft }} />
+                          <span style={{ fontSize: "10px", color: C.muted }}>{s.items.length}</span>
+                        </div>
+                        {s.items.map(renderTask)}
+                      </div>
+                    )
+                  ))}
+                  {sections.every(s => s.items.length === 0) && (
+                    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "40px", textAlign: "center" }}>
+                      <div style={{ fontFamily: C.serif, fontSize: "20px", color: C.navy, marginBottom: "6px" }}>Tout est traité.</div>
+                      <div style={{ fontSize: "12px", color: C.muted }}>Aucune mission urgente. Profite.</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ── KANBAN ── */}
+            {view === "kanban" && (() => {
+              const cols = [
+                { id: "upcoming", label: "À venir", color: C.violet, faint: C.violetFaint },
+                { id: "active",   label: "En cours", color: C.blue,   faint: C.blueFaint },
+                { id: "review",   label: "Révision", color: C.amber,  faint: C.amberFaint },
+                { id: "done",     label: "Livré",    color: C.green,  faint: C.greenFaint },
+              ];
+              const filtered = tasks.filter(t => filter === "all" || t.client === filter);
+              return (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", height: "100%" }}>
+                  {cols.map(col => {
+                    const items = filtered.filter(t => t.status === col.id);
+                    return (
+                      <div
+                        key={col.id}
+                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const taskId = e.dataTransfer.getData("text/plain");
+                          if (taskId) updateStatusWithUndo(taskId, col.id);
+                        }}
+                        style={{
+                          background: C.surface, border: `1px solid ${C.border}`,
+                          borderRadius: "10px", padding: "12px",
+                          display: "flex", flexDirection: "column", gap: "8px",
+                          minHeight: "200px",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+                          <span style={{ fontSize: "10px", padding: "2px 9px", borderRadius: "20px", background: col.faint, color: col.color, fontWeight: "600", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                            {col.label}
+                          </span>
+                          <span style={{ fontSize: "10px", color: C.muted, fontWeight: "600" }}>{items.length}</span>
+                        </div>
+                        {items.length === 0 ? (
+                          <div style={{ fontSize: "10px", color: C.muted, fontStyle: "italic", textAlign: "center", padding: "12px 0" }}>—</div>
+                        ) : items.map(t => {
+                          const cl = clientById[t.client];
+                          return (
+                            <div
+                              key={t.id}
+                              draggable
+                              onDragStart={(e) => { e.dataTransfer.setData("text/plain", t.id); e.dataTransfer.effectAllowed = "move"; }}
+                              style={{
+                                background: C.bg, border: `1px solid ${C.border}`,
+                                borderLeft: `3px solid ${cl.color}`,
+                                borderRadius: "6px", padding: "8px 10px",
+                                cursor: "grab", userSelect: "none",
+                                display: "flex", alignItems: "flex-start", gap: "8px",
+                              }}
+                            >
+                              {t.status !== "done" && (
+                                <div
+                                  onClick={(e) => { e.stopPropagation(); updateStatusWithUndo(t.id, "done"); }}
+                                  title="Marquer comme livré"
+                                  className="task-check"
+                                  style={{
+                                    width: "16px", height: "16px", borderRadius: "4px",
+                                    border: `1.5px solid ${cl.color}55`,
+                                    background: C.surface, flexShrink: 0,
+                                    cursor: "pointer", marginTop: "1px",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    transition: "border-color 0.12s, background 0.12s",
+                                  }}
+                                />
+                              )}
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
+                                  {t.priority === "urgent" && (
+                                    <span style={{ fontSize: "8px", padding: "1px 5px", borderRadius: "3px", background: C.redFaint, color: C.red, fontWeight: "700" }}>!</span>
+                                  )}
+                                  <span style={{ fontSize: "11px", fontWeight: "600", color: C.navy, lineHeight: "1.3" }}>{t.title}</span>
+                                </div>
+                                <div style={{ fontSize: "9px", color: C.muted }}>
+                                  {cl.name}
+                                  {t.due && <span style={{ color: isOverdue(t.due) ? C.red : C.muted, marginLeft: "5px" }}>· {fmtDate(t.due)}</span>}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {/* ── RITUELS ── */}
             {view === "rituels" && (
@@ -842,7 +1436,9 @@ export default function App() {
               function onDragStart(e, taskId) {
                 e.dataTransfer.setData("text/plain", taskId);
                 e.dataTransfer.effectAllowed = "move";
-                setDraggingId(taskId);
+                // Defer state update so the browser's drag image is captured BEFORE
+                // re-render dims the source chip — fixes "ghost is faded" jank.
+                requestAnimationFrame(() => setDraggingId(taskId));
               }
               function onDragEnd() {
                 setDraggingId(null);
@@ -860,42 +1456,41 @@ export default function App() {
                 setDraggingId(null);
                 setDragOverDate(null);
               }
+              function quickAddOnDate(dateStr) {
+                setNewDue(dateStr);
+                setShowModal(true);
+              }
+              function jumpToToday() {
+                setCalendarMonth(ymKey(todayISO()));
+              }
 
               const calendarTasks = tasks.filter(t =>
                 t.status !== "done" && (filter === "all" || t.client === filter)
               );
               const undated = calendarTasks.filter(t => !t.due);
-
-              const TaskChip = ({ task }) => {
-                const cl = clientById[task.client];
-                const isDragging = draggingId === task.id;
-                return (
-                  <div
-                    draggable
-                    onDragStart={(e) => onDragStart(e, task.id)}
-                    onDragEnd={onDragEnd}
-                    title={`${task.title} — ${cl.name}${task.project ? " · " + task.project : ""}`}
-                    style={{
-                      fontSize: "9px", padding: "3px 6px", borderRadius: "3px",
-                      background: C.surface,
-                      borderLeft: `2px solid ${cl.color}`,
-                      color: C.navy, lineHeight: "1.3",
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      cursor: "grab", opacity: isDragging ? 0.4 : 1,
-                      userSelect: "none",
-                    }}
-                  >
-                    {task.priority === "urgent" && <span style={{ color: C.red, fontWeight: "700", marginRight: "3px" }}>!</span>}
-                    {task.title}
-                  </div>
-                );
-              };
+              const todayKey = ymKey(todayISO());
 
               return (
                 <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", gap: "12px" }}>
                     <button onClick={() => shiftCalMonth(-1)} style={{ fontSize: "12px", padding: "6px 14px", borderRadius: "6px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer" }}>← Mois précédent</button>
-                    <div style={{ fontFamily: C.serif, fontSize: "20px", fontWeight: "700", color: C.navy, textTransform: "capitalize" }}>{fmtMonth(calendarMonth)}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <div style={{ fontFamily: C.serif, fontSize: "20px", fontWeight: "700", color: C.navy, textTransform: "capitalize" }}>{fmtMonth(calendarMonth)}</div>
+                      <button
+                        onClick={jumpToToday}
+                        disabled={calendarMonth === todayKey}
+                        style={{
+                          fontSize: "10px", padding: "4px 10px", borderRadius: "20px",
+                          border: `1px solid ${calendarMonth === todayKey ? C.borderSoft : C.navy}`,
+                          background: calendarMonth === todayKey ? "transparent" : C.navyFaint,
+                          color: calendarMonth === todayKey ? C.muted : C.navy,
+                          cursor: calendarMonth === todayKey ? "default" : "pointer",
+                          fontWeight: "600", letterSpacing: "0.04em",
+                        }}
+                      >
+                        Aujourd'hui
+                      </button>
+                    </div>
                     <button onClick={() => shiftCalMonth(1)} style={{ fontSize: "12px", padding: "6px 14px", borderRadius: "6px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer" }}>Mois suivant →</button>
                   </div>
 
@@ -915,8 +1510,8 @@ export default function App() {
                         return (
                           <div
                             key={i}
+                            className="cal-cell"
                             onDragOver={(e) => onDragOverCell(e, cellStr)}
-                            onDragLeave={() => setDragOverDate(prev => prev === cellStr ? null : prev)}
                             onDrop={(e) => onDropCell(e, cellStr)}
                             style={{
                               background: isOver ? C.blueFaint : isToday ? C.navyFaint : C.bg,
@@ -924,10 +1519,19 @@ export default function App() {
                               borderRadius: "8px", padding: "6px", minHeight: "100px",
                               display: "flex", flexDirection: "column", gap: "3px",
                               transition: "background 0.1s, border-color 0.1s",
+                              position: "relative",
                             }}
                           >
                             <div style={{ fontSize: "11px", fontWeight: "700", color: isToday ? C.blue : C.navy, marginBottom: "3px" }}>{cell.getDate()}</div>
-                            {dayTasks.map(t => <TaskChip key={t.id} task={t} />)}
+                            {dayTasks.map(t => (
+                              <TaskChip
+                                key={t.id}
+                                task={t}
+                                isDragging={draggingId === t.id}
+                                onDragStart={onDragStart}
+                                onDragEnd={onDragEnd}
+                              />
+                            ))}
                           </div>
                         );
                       })}
@@ -955,7 +1559,15 @@ export default function App() {
                     </div>
                     {undated.length > 0 ? (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
-                        {undated.map(t => <TaskChip key={t.id} task={t} />)}
+                        {undated.map(t => (
+                          <TaskChip
+                            key={t.id}
+                            task={t}
+                            isDragging={draggingId === t.id}
+                            onDragStart={onDragStart}
+                            onDragEnd={onDragEnd}
+                          />
+                        ))}
                       </div>
                     ) : (
                       <div style={{ fontSize: "11px", color: C.muted, fontStyle: "italic" }}>Aucune tâche sans date.</div>
@@ -1076,6 +1688,34 @@ export default function App() {
             </div>
 
             <div style={{ padding: "20px 22px" }}>
+              {/* Templates */}
+              <div style={{ marginBottom: "16px" }}>
+                <label style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "7px" }}>
+                  Templates
+                </label>
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  {TASK_TEMPLATES.map(tpl => (
+                    <button
+                      key={tpl.id}
+                      onClick={() => {
+                        setNewTitle(tpl.title);
+                        setNewDescription(tpl.description);
+                        setNewProject(tpl.project);
+                        setAddClient(tpl.client);
+                        setNewSteps(tpl.steps || []);
+                      }}
+                      style={{
+                        fontSize: "10px", padding: "5px 11px", borderRadius: "20px",
+                        border: `1px solid ${C.border}`, background: "transparent",
+                        color: C.muted, cursor: "pointer", letterSpacing: "0.04em",
+                      }}
+                    >
+                      {tpl.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Title */}
               <div style={{ marginBottom: "14px" }}>
                 <label style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "7px" }}>
@@ -1111,32 +1751,6 @@ export default function App() {
                     outline: "none", fontFamily: C.sans, resize: "vertical",
                   }}
                 />
-              </div>
-
-              {/* Client selector */}
-              <div style={{ marginBottom: "14px" }}>
-                <label style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "7px" }}>
-                  Client
-                </label>
-                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                  {CLIENTS.map(cl => (
-                    <button
-                      key={cl.id}
-                      onClick={() => setAddClient(cl.id)}
-                      style={{
-                        padding: "7px 16px", borderRadius: "7px",
-                        border: `1px solid ${addClient === cl.id ? cl.color : C.border}`,
-                        background: addClient === cl.id ? cl.color + "12" : "transparent",
-                        color: addClient === cl.id ? cl.color : C.muted,
-                        fontSize: "12px", fontWeight: "600", cursor: "pointer",
-                        display: "flex", alignItems: "center", gap: "7px",
-                      }}
-                    >
-                      <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: cl.color, display: "inline-block" }} />
-                      {cl.name}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               {/* Project + Date row */}
@@ -1226,6 +1840,117 @@ export default function App() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── SEARCH MODAL (Cmd+K) ─────────────────────────────────── */}
+      {searchOpen && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setSearchOpen(false); }}
+          style={{
+            position: "fixed", inset: 0,
+            background: "rgba(26,26,46,0.38)", backdropFilter: "blur(5px)",
+            display: "flex", alignItems: "flex-start", justifyContent: "center",
+            zIndex: 250, padding: "80px 20px 20px",
+          }}
+        >
+          <div style={{
+            background: C.surface, borderRadius: "12px",
+            border: `1px solid ${C.border}`,
+            width: "100%", maxWidth: "560px",
+            boxShadow: "0 24px 64px rgba(26,26,46,0.18)",
+            overflow: "hidden",
+          }}>
+            <div style={{ borderBottom: `1px solid ${C.borderSoft}`, padding: "14px 18px" }}>
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Rechercher une tâche, client, projet, note…"
+                style={{
+                  width: "100%", fontSize: "14px", padding: "6px 0",
+                  border: "none", outline: "none", background: "transparent",
+                  color: C.navy, fontFamily: C.sans,
+                }}
+              />
+            </div>
+            <div style={{ maxHeight: "60vh", overflow: "auto", padding: "8px 0" }}>
+              {!searchQuery.trim() ? (
+                <div style={{ padding: "24px", textAlign: "center", fontSize: "12px", color: C.muted }}>
+                  Tape pour chercher · ⌘K depuis n'importe où · Esc pour fermer
+                </div>
+              ) : searchResults.length === 0 ? (
+                <div style={{ padding: "24px", textAlign: "center", fontSize: "12px", color: C.muted }}>
+                  Aucun résultat pour « {searchQuery} »
+                </div>
+              ) : searchResults.map(t => {
+                const cl = clientById[t.client];
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => {
+                      setSearchOpen(false);
+                      setSearchQuery("");
+                      setView("missions");
+                      setExpanded(t.id);
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "10px",
+                      padding: "9px 18px", cursor: "pointer",
+                      borderLeft: `3px solid ${cl.color}`,
+                    }}
+                    className="hover-bg"
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: "12px", fontWeight: "600", color: C.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {t.title}
+                      </div>
+                      <div style={{ fontSize: "10px", color: C.muted, marginTop: "2px" }}>
+                        {cl.name} · {t.project}
+                        {t.due && <span style={{ marginLeft: "6px" }}>· {fmtDate(t.due)}</span>}
+                      </div>
+                    </div>
+                    <StatusBadge status={t.status} small />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── UNDO TOAST ─────────────────────────────────────────── */}
+      {undo && (
+        <div style={{
+          position: "fixed", bottom: "24px", left: "50%",
+          transform: "translateX(-50%)", zIndex: 300,
+          background: C.navy, color: "#fff",
+          padding: "10px 14px 10px 18px", borderRadius: "8px",
+          display: "flex", alignItems: "center", gap: "14px",
+          boxShadow: "0 12px 32px rgba(26,26,46,0.32)",
+          fontSize: "12px", maxWidth: "90vw",
+        }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{undo.label}</span>
+          <button
+            onClick={applyUndo}
+            style={{
+              fontSize: "11px", padding: "5px 12px", borderRadius: "5px",
+              border: "none", background: "#fff", color: C.navy,
+              cursor: "pointer", fontWeight: "600", letterSpacing: "0.04em",
+            }}
+          >
+            Annuler
+          </button>
+          <button
+            onClick={() => setUndo(null)}
+            style={{
+              fontSize: "13px", background: "none", border: "none",
+              color: "#fff", opacity: 0.6, cursor: "pointer",
+              padding: "0 4px", lineHeight: 1,
+            }}
+          >
+            ✕
+          </button>
         </div>
       )}
     </>
