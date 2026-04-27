@@ -1038,17 +1038,9 @@ export default function App() {
               const today = todayISO();
               const overdue = tasks.filter(t => t.status !== "done" && t.due && t.due < today && (filter === "all" || t.client === filter));
               const dueToday = tasks.filter(t => t.status !== "done" && t.due === today && (filter === "all" || t.client === filter));
-              const upcoming7 = (() => {
-                const d = new Date(); d.setDate(d.getDate() + 7);
-                const limit = d.toISOString().slice(0, 10);
-                return tasks.filter(t => t.status !== "done" && t.due && t.due > today && t.due <= limit && (filter === "all" || t.client === filter));
-              })();
-              const undated = tasks.filter(t => t.status !== "done" && !t.due && (filter === "all" || t.client === filter));
               const sections = [
                 { title: "En retard", color: C.red, faint: C.redFaint, items: overdue },
                 { title: "Aujourd'hui", color: C.blue, faint: C.blueFaint, items: dueToday },
-                { title: "7 prochains jours", color: C.violet, faint: C.violetFaint, items: upcoming7 },
-                { title: "Sans date", color: C.muted, faint: C.bg, items: undated },
               ];
               const renderTask = (task) => (
                 <TaskCard
@@ -1069,11 +1061,10 @@ export default function App() {
               return (
                 <div>
                   {/* Hero numbers */}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", marginBottom: "24px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px", marginBottom: "24px" }}>
                     {[
                       { label: "En retard",   val: overdue.length,    color: overdue.length > 0 ? C.red : C.muted },
                       { label: "Aujourd'hui", val: dueToday.length,   color: C.blue },
-                      { label: "7 jours",     val: upcoming7.length,  color: C.violet },
                     ].map(s => (
                       <div key={s.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "16px 18px" }}>
                         <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "6px" }}>{s.label}</div>
