@@ -107,8 +107,10 @@ const C = {
   violet: "#6D28D9",
   violetFaint: "#F5F3FF",
   muted: "#8A8880",
-  serif: "'Playfair Display', Georgia, serif",
-  sans: "'DM Sans', sans-serif",
+  serif: "'Poppins', sans-serif",
+  sans: "'Poppins', sans-serif",
+  shadow: "0 1px 2px rgba(26,26,46,0.04), 0 4px 12px rgba(26,26,46,0.04)",
+  shadowLg: "0 8px 24px rgba(26,26,46,0.08), 0 2px 6px rgba(26,26,46,0.04)",
 };
 
 const STATUS = {
@@ -129,18 +131,23 @@ function fmtDate(s) {
 
 function isOverdue(s) {
   if (!s) return false;
-  return new Date(s) < TODAY;
+  return s < todayISO();
+}
+
+function toLocalISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return toLocalISO(new Date());
 }
 
 function addOneMonth(dateStr) {
   if (!dateStr) return null;
-  const d = new Date(dateStr);
+  const [y, m, day] = dateStr.split("-").map(Number);
+  const d = new Date(y, m - 1, day);
   d.setMonth(d.getMonth() + 1);
-  return d.toISOString().slice(0, 10);
+  return toLocalISO(d);
 }
 
 function ymKey(dateStr) {
@@ -190,6 +197,7 @@ function TaskChip({ task, isDragging, onDragStart, onDragEnd }) {
         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         cursor: "grab", opacity: isDragging ? 0.4 : 1,
         userSelect: "none",
+        minWidth: 0, maxWidth: "100%",
       }}
     >
       {task.priority === "urgent" && <span style={{ color: C.red, fontWeight: "700", marginRight: "3px" }}>!</span>}
@@ -449,8 +457,6 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [undo, setUndo] = useState(null); // { snapshot, label }
   const [prefs, setPrefs] = useState(() => loadPrefs());
-  const [reorderDragId, setReorderDragId] = useState(null);
-  const [reorderOverId, setReorderOverId] = useState(null);
   const undoTimerRef = useRef(null);
 
   // Persist prefs whenever they change
@@ -509,19 +515,10 @@ export default function App() {
     return { overdue, urgent, today: todayCount, week };
   }, [tasks]);
 
-  // Filtered tasks
-  const activeTasks = tasks.filter(t => {
-    if (t.status === "done") return false;
-    if (filter !== "all" && t.client !== filter) return false;
-    if (statusFilter === "urgent") return t.priority === "urgent";
-    if (statusFilter === "overdue") return t.due && t.due < todayISO();
-    if (statusFilter !== "all" && t.status !== statusFilter) return false;
-    return true;
-  });
+  // Done tasks (used by historique)
   const doneTasks = tasks.filter(t =>
     t.status === "done" && (filter === "all" || t.client === filter)
   );
-  const taskCount = { active: tasks.filter(t => t.status === "active").length, done: tasks.filter(t => t.status === "done").length };
 
   // Search results
   const searchResults = useMemo(() => {
@@ -535,13 +532,6 @@ export default function App() {
       (clientById[t.client]?.name || "").toLowerCase().includes(q)
     ).slice(0, 30);
   }, [searchQuery, tasks]);
-
-  // Timeline — next 7 days
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(TODAY);
-    d.setDate(TODAY.getDate() + i);
-    return d;
-  });
 
   function updateStatus(id, status) {
     setTasks(prev => {
@@ -669,21 +659,6 @@ export default function App() {
     updateStatus(id, status);
   }
 
-  function reorderTasks(dragId, overId) {
-    if (!dragId || !overId || dragId === overId) return;
-    setTasks(prev => {
-      const ids = prev.map(t => t.id);
-      const dragIdx = ids.indexOf(dragId);
-      const overIdx = ids.indexOf(overId);
-      if (dragIdx < 0 || overIdx < 0) return prev;
-      const updated = [...prev];
-      const [moved] = updated.splice(dragIdx, 1);
-      updated.splice(overIdx, 0, moved);
-      saveTasks(updated);
-      return updated;
-    });
-  }
-
   function closeModal() {
     setShowModal(false);
     setNewTitle("");
@@ -767,28 +742,35 @@ export default function App() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: ${C.bg}; font-family: ${C.sans}; }
-        ::-webkit-scrollbar { width: 3px; }
-        ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 2px; }
+        body { background: ${C.bg}; font-family: ${C.sans}; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 4px; border: 2px solid ${C.bg}; }
+        ::-webkit-scrollbar-thumb:hover { background: ${C.muted}; }
         .hover-bg:hover { background: ${C.bg} !important; }
-        .hover-lift:hover { transform: translateY(-1px); opacity: 0.9; }
-        .hover-lift { transition: transform 0.15s ease, opacity 0.15s ease; }
-        input:focus { outline: 2px solid ${C.navy}40 !important; }
+        .hover-lift { transition: transform 0.18s cubic-bezier(.4,0,.2,1), box-shadow 0.18s, opacity 0.18s; }
+        .hover-lift:hover { transform: translateY(-1px); box-shadow: ${C.shadowLg}; }
+        .hover-card { transition: border-color 0.15s, box-shadow 0.15s; }
+        .hover-card:hover { border-color: ${C.borderSoft}; box-shadow: ${C.shadow}; }
+        input:focus, textarea:focus { outline: 2px solid ${C.navy}30 !important; outline-offset: 1px; }
         .task-check:hover { border-color: ${C.green} !important; background: ${C.greenFaint} !important; }
         .task-check:hover::after { content: "✓"; font-size: 11px; color: ${C.green}; font-weight: 700; }
-        .cal-cell:hover .cell-add-btn { opacity: 1; }
-        .cell-add-btn:hover { background: ${C.surface}; color: ${C.navy} !important; }
+        .cal-cell { transition: background 0.12s, border-color 0.12s, transform 0.12s; }
+        .cal-cell:hover:not(.empty) { border-color: ${C.border} !important; }
+        .cal-cell:hover .cell-add-btn { opacity: 1 !important; }
+        .cell-add-btn:hover { background: ${C.navy} !important; color: #fff !important; }
         .density-compact .task-row { padding: 6px 14px !important; gap: 9px !important; }
         .density-compact .task-row .task-meta { display: none; }
         .density-compact .task-row .task-title { font-size: 12px !important; }
         .density-compact main { padding: 14px 18px !important; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fadeIn 0.25s ease-out; }
         @media (max-width: 720px) {
           aside.sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 100; transform: translateX(-100%); transition: transform 0.2s; }
           aside.sidebar.open { transform: translateX(0); }
           .mobile-burger { display: inline-flex !important; }
-          .kanban-grid { grid-template-columns: 1fr !important; }
           .stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
         }
       `}</style>
@@ -810,9 +792,7 @@ export default function App() {
 
           {/* Nav */}
           <div style={{ padding: "16px 8px 4px" }}>
-            {navBtn("aujourd-hui","Aujourd'hui",       "★", counts.today > 0 ? { value: counts.today, color: C.navyFaint, fg: C.navy } : null)}
-            {navBtn("missions",   "Missions",          "◈", counts.overdue > 0 ? { value: counts.overdue, color: C.redFaint, fg: C.red } : null)}
-            {navBtn("kanban",     "Kanban",            "▥")}
+            {navBtn("aujourd-hui","Aujourd'hui",       "★", counts.overdue > 0 ? { value: counts.overdue, color: C.redFaint, fg: C.red } : counts.today > 0 ? { value: counts.today, color: C.navyFaint, fg: C.navy } : null)}
             {navBtn("calendrier", "Calendrier",        "▤")}
             {navBtn("historique", "Historique",        "❒")}
             {navBtn("rituels",    "Rituels",           "↺")}
@@ -881,20 +861,16 @@ export default function App() {
               ☰
             </button>
             <div style={{ flex: 1 }}>
-              <h1 style={{ fontFamily: C.serif, fontSize: "19px", fontWeight: "700", color: C.navy, lineHeight: 1.2 }}>
+              <h1 style={{ fontFamily: C.serif, fontSize: "20px", fontWeight: "600", color: C.navy, lineHeight: 1.2, letterSpacing: "-0.01em" }}>
                 {{
                   "aujourd-hui": "Aujourd'hui",
-                  missions: "Missions",
-                  kanban: "Kanban",
                   rituels: "Rituels quotidiens — Anissa",
-                  timeline: "Timeline — 7 prochains jours",
-                  calendrier: "Calendrier — drag & drop",
-                  historique: "Historique des tâches livrées",
-                  archive: "Archive",
+                  calendrier: "Calendrier",
+                  historique: "Historique",
                 }[view]}
               </h1>
             </div>
-            {(view === "missions" || view === "aujourd-hui" || view === "kanban") && (
+            {view === "aujourd-hui" && (
               <button
                 className="hover-lift"
                 onClick={() => setShowModal(true)}
@@ -904,10 +880,11 @@ export default function App() {
                   background: C.navy, color: "#fff",
                   border: "none", cursor: "pointer",
                   fontSize: "12px", fontWeight: "600", letterSpacing: "0.04em",
+                  boxShadow: C.shadow,
                 }}
               >
                 <span style={{ fontSize: "15px", lineHeight: 1 }}>+</span>
-                Ajouter une tâche
+                Nouvelle tâche
               </button>
             )}
           </header>
@@ -915,272 +892,126 @@ export default function App() {
           {/* Scroll area */}
           <main style={{ flex: 1, overflow: "auto", padding: "22px 24px" }}>
 
-            {/* ── MISSIONS ── */}
-            {view === "missions" && (
-              <div>
-                {/* Filters bar */}
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "18px" }}>
-                  {[
-                    { id: "all", label: "Toutes" },
-                    { id: "urgent", label: "Urgent", color: C.red, faint: C.redFaint },
-                    { id: "overdue", label: "En retard", color: C.red, faint: C.redFaint },
-                  ].map(p => {
-                    const sel = statusFilter === p.id;
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => setStatusFilter(p.id)}
-                        style={{
-                          fontSize: "11px", padding: "5px 12px", borderRadius: "20px",
-                          border: `1px solid ${sel ? (p.color || C.navy) : C.border}`,
-                          background: sel ? (p.faint || C.navyFaint) : "transparent",
-                          color: sel ? (p.color || C.navy) : C.muted,
-                          cursor: "pointer", letterSpacing: "0.04em",
-                          fontWeight: sel ? "600" : "400",
-                        }}
-                      >
-                        {p.label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {(() => {
-                  const groups = ["active", "review", "upcoming"].map(st => ({
-                    key: st, status: st, items: activeTasks.filter(t => t.status === st),
-                  }));
-                  return groups.map(g => {
-                    if (!g.items.length) return null;
-                    return (
-                      <div key={g.key} style={{ marginBottom: "26px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "11px" }}>
-                          <StatusBadge status={g.status} />
-                          <div style={{ flex: 1, height: "1px", background: C.borderSoft }} />
-                          <span style={{ fontSize: "10px", color: C.muted }}>{g.items.length}</span>
-                        </div>
-                        {g.items.map(task => (
-                          <div
-                            key={task.id}
-                            draggable
-                            onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", task.id); setReorderDragId(task.id); }}
-                            onDragOver={(e) => { e.preventDefault(); if (reorderOverId !== task.id) setReorderOverId(task.id); }}
-                            onDrop={(e) => { e.preventDefault(); reorderTasks(reorderDragId, task.id); setReorderDragId(null); setReorderOverId(null); }}
-                            onDragEnd={() => { setReorderDragId(null); setReorderOverId(null); }}
-                            style={{
-                              opacity: reorderDragId === task.id ? 0.4 : 1,
-                              outline: reorderOverId === task.id && reorderDragId !== task.id ? `2px dashed ${C.navy}` : "none",
-                              outlineOffset: "-2px",
-                              borderRadius: "8px",
-                            }}
-                          >
-                            <TaskCard
-                              task={task}
-                              expanded={expanded === task.id}
-                              onToggle={() => setExpanded(expanded === task.id ? null : task.id)}
-                              onStatusChange={(s) => updateStatusWithUndo(task.id, s)}
-                              onToggleRecurring={() => updateRecurring(task.id)}
-                              onChangeDue={(d) => updateDue(task.id, d)}
-                              onChangeTitle={(t) => updateTitle(task.id, t)}
-                              onChangeNotes={(n) => updateNotes(task.id, n)}
-                              onToggleStep={(i) => toggleStep(task.id, i)}
-                              onCheck={() => updateStatusWithUndo(task.id, "done")}
-                              onDelete={() => deleteTask(task.id)}
-                              density={prefs.density}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  });
-                })()}
-
-                {doneTasks.length > 0 && (
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "11px" }}>
-                      <StatusBadge status="done" />
-                      <div style={{ flex: 1, height: "1px", background: C.borderSoft }} />
-                      <span style={{ fontSize: "10px", color: C.muted }}>{doneTasks.length}</span>
-                    </div>
-                    {doneTasks.map(task => {
-                      const cl = clientById[task.client];
-                      return (
-                        <div
-                          key={task.id}
-                          className="hover-bg"
-                          style={{
-                            background: C.surface, opacity: 0.55,
-                            border: `1px solid ${C.border}`, borderRadius: "8px",
-                            borderLeft: `3px solid ${cl.color}`,
-                            padding: "10px 16px", marginBottom: "5px",
-                            display: "flex", alignItems: "center",
-                          }}
-                        >
-                          <div style={{ flex: 1 }}>
-                            <span style={{ fontSize: "12px", color: C.muted, textDecoration: "line-through" }}>{task.title}</span>
-                            <div style={{ fontSize: "10px", color: C.muted, marginTop: "2px" }}>{cl.name} · {fmtDate(task.due)}</div>
-                          </div>
-                          <button
-                            onClick={() => updateStatus(task.id, "active")}
-                            style={{ fontSize: "9px", color: C.muted, background: "none", border: `1px solid ${C.border}`, borderRadius: "4px", padding: "2px 7px", cursor: "pointer" }}
-                          >
-                            Rouvrir
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── AUJOURD'HUI ── */}
+            {/* ── AUJOURD'HUI (vue principale — toutes les tâches) ── */}
             {view === "aujourd-hui" && (() => {
               const today = todayISO();
-              const overdue = tasks.filter(t => t.status !== "done" && t.due && t.due < today && (filter === "all" || t.client === filter));
-              const dueToday = tasks.filter(t => t.status !== "done" && t.due === today && (filter === "all" || t.client === filter));
-              const sections = [
-                { title: "En retard", color: C.red, faint: C.redFaint, items: overdue },
-                { title: "Aujourd'hui", color: C.blue, faint: C.blueFaint, items: dueToday },
-              ];
+              const inWeek = (() => {
+                const d = new Date();
+                d.setDate(d.getDate() + 7);
+                return toLocalISO(d);
+              })();
+              const matchClient = (t) => filter === "all" || t.client === filter;
+              const matchStatusFilter = (t) => {
+                if (statusFilter === "all") return true;
+                if (statusFilter === "urgent") return t.priority === "urgent";
+                if (statusFilter === "overdue") return t.due && t.due < today;
+                return t.status === statusFilter;
+              };
+              const visible = tasks.filter(t => t.status !== "done" && matchClient(t) && matchStatusFilter(t));
+
+              const overdue   = visible.filter(t => t.due && t.due < today);
+              const dueToday  = visible.filter(t => t.due === today);
+              const week      = visible.filter(t => t.due && t.due > today && t.due <= inWeek);
+              const later     = visible.filter(t => t.due && t.due > inWeek);
+              const undated   = visible.filter(t => !t.due);
+
               const renderTask = (task) => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  expanded={expanded === task.id}
-                  onToggle={() => setExpanded(expanded === task.id ? null : task.id)}
-                  onStatusChange={(s) => updateStatusWithUndo(task.id, s)}
-                  onToggleRecurring={() => updateRecurring(task.id)}
-                  onChangeDue={(d) => updateDue(task.id, d)}
-                  onChangeTitle={(t) => updateTitle(task.id, t)}
-                  onChangeNotes={(n) => updateNotes(task.id, n)}
-                  onToggleStep={(i) => toggleStep(task.id, i)}
-                  onCheck={() => updateStatusWithUndo(task.id, "done")}
-                  onDelete={() => deleteTask(task.id)}
-                />
+                <div key={task.id} className="fade-in">
+                  <TaskCard
+                    task={task}
+                    expanded={expanded === task.id}
+                    onToggle={() => setExpanded(expanded === task.id ? null : task.id)}
+                    onStatusChange={(s) => updateStatusWithUndo(task.id, s)}
+                    onToggleRecurring={() => updateRecurring(task.id)}
+                    onChangeDue={(d) => updateDue(task.id, d)}
+                    onChangeTitle={(t) => updateTitle(task.id, t)}
+                    onChangeNotes={(n) => updateNotes(task.id, n)}
+                    onToggleStep={(i) => toggleStep(task.id, i)}
+                    onCheck={() => updateStatusWithUndo(task.id, "done")}
+                    onDelete={() => deleteTask(task.id)}
+                    density={prefs.density}
+                  />
+                </div>
               );
+
+              const sections = [
+                { key: "overdue",  title: "En retard",      color: C.red,    faint: C.redFaint,    items: overdue },
+                { key: "today",    title: "Aujourd'hui",    color: C.blue,   faint: C.blueFaint,   items: dueToday },
+                { key: "week",     title: "Cette semaine",  color: C.violet, faint: C.violetFaint, items: week },
+                { key: "later",    title: "À venir",        color: C.amber,  faint: C.amberFaint,  items: later },
+                { key: "undated",  title: "Sans date",      color: C.muted,  faint: C.borderSoft,  items: undated },
+              ];
+
               return (
                 <div>
-                  {/* Hero numbers */}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px", marginBottom: "24px" }}>
+                  {/* Hero stats */}
+                  <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "24px" }}>
                     {[
-                      { label: "En retard",   val: overdue.length,    color: overdue.length > 0 ? C.red : C.muted },
-                      { label: "Aujourd'hui", val: dueToday.length,   color: C.blue },
+                      { label: "En retard",   val: overdue.length,   color: overdue.length > 0 ? C.red : C.muted, sub: overdue.length === 0 ? "rien à rattraper" : "à traiter en priorité" },
+                      { label: "Aujourd'hui", val: dueToday.length,  color: C.blue,   sub: "tâches du jour" },
+                      { label: "Cette semaine", val: week.length,    color: C.violet, sub: "7 prochains jours" },
+                      { label: "Total actif", val: visible.length,   color: C.navy,   sub: "tâches ouvertes" },
                     ].map(s => (
-                      <div key={s.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "16px 18px" }}>
-                        <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "6px" }}>{s.label}</div>
-                        <div style={{ fontFamily: C.serif, fontSize: "34px", fontWeight: "700", color: s.color, lineHeight: 1 }}>{s.val}</div>
+                      <div key={s.label} className="hover-card" style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "12px", padding: "18px 20px", boxShadow: C.shadow }}>
+                        <div style={{ fontSize: "10px", letterSpacing: "0.14em", textTransform: "uppercase", color: C.muted, marginBottom: "8px", fontWeight: "500" }}>{s.label}</div>
+                        <div style={{ fontFamily: C.serif, fontSize: "36px", fontWeight: "600", color: s.color, lineHeight: 1, letterSpacing: "-0.02em" }}>{s.val}</div>
+                        <div style={{ fontSize: "10px", color: C.muted, marginTop: "6px" }}>{s.sub}</div>
                       </div>
                     ))}
                   </div>
+
+                  {/* Filter chips */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "20px", flexWrap: "wrap" }}>
+                    {[
+                      { id: "all",      label: "Toutes" },
+                      { id: "urgent",   label: "Urgent",   color: C.red,    faint: C.redFaint },
+                      { id: "overdue",  label: "En retard", color: C.red,   faint: C.redFaint },
+                      { id: "active",   label: "En cours", color: C.blue,   faint: C.blueFaint },
+                      { id: "review",   label: "Révision", color: C.amber,  faint: C.amberFaint },
+                      { id: "upcoming", label: "À venir",  color: C.violet, faint: C.violetFaint },
+                    ].map(p => {
+                      const sel = statusFilter === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => setStatusFilter(p.id)}
+                          style={{
+                            fontSize: "11px", padding: "6px 13px", borderRadius: "20px",
+                            border: `1px solid ${sel ? (p.color || C.navy) : C.border}`,
+                            background: sel ? (p.faint || C.navyFaint) : C.surface,
+                            color: sel ? (p.color || C.navy) : C.muted,
+                            cursor: "pointer", letterSpacing: "0.02em",
+                            fontWeight: sel ? "600" : "400",
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   {sections.map(s => (
                     s.items.length === 0 ? null : (
-                      <div key={s.title} style={{ marginBottom: "26px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "11px" }}>
-                          <span style={{ fontSize: "9px", padding: "2px 9px", borderRadius: "20px", background: s.faint, color: s.color, fontWeight: "600", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+                      <div key={s.key} style={{ marginBottom: "28px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+                          <span style={{ fontSize: "10px", padding: "3px 11px", borderRadius: "20px", background: s.faint, color: s.color, fontWeight: "600", letterSpacing: "0.08em", textTransform: "uppercase" }}>
                             {s.title}
                           </span>
                           <div style={{ flex: 1, height: "1px", background: C.borderSoft }} />
-                          <span style={{ fontSize: "10px", color: C.muted }}>{s.items.length}</span>
+                          <span style={{ fontSize: "11px", color: C.muted, fontWeight: "500" }}>{s.items.length}</span>
                         </div>
                         {s.items.map(renderTask)}
                       </div>
                     )
                   ))}
-                  {sections.every(s => s.items.length === 0) && (
-                    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "40px", textAlign: "center" }}>
-                      <div style={{ fontFamily: C.serif, fontSize: "20px", color: C.navy, marginBottom: "6px" }}>Tout est traité.</div>
-                      <div style={{ fontSize: "12px", color: C.muted }}>Aucune mission urgente. Profite.</div>
+
+                  {visible.length === 0 && (
+                    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "12px", padding: "56px 32px", textAlign: "center", boxShadow: C.shadow }}>
+                      <div style={{ fontFamily: C.serif, fontSize: "22px", color: C.navy, marginBottom: "8px", fontWeight: "500" }}>Tout est traité.</div>
+                      <div style={{ fontSize: "13px", color: C.muted }}>Aucune mission ouverte sur ce filtre. Profite.</div>
                     </div>
                   )}
-                </div>
-              );
-            })()}
-
-            {/* ── KANBAN ── */}
-            {view === "kanban" && (() => {
-              const cols = [
-                { id: "upcoming", label: "À venir", color: C.violet, faint: C.violetFaint },
-                { id: "active",   label: "En cours", color: C.blue,   faint: C.blueFaint },
-                { id: "review",   label: "Révision", color: C.amber,  faint: C.amberFaint },
-                { id: "done",     label: "Livré",    color: C.green,  faint: C.greenFaint },
-              ];
-              const filtered = tasks.filter(t => filter === "all" || t.client === filter);
-              return (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", height: "100%" }}>
-                  {cols.map(col => {
-                    const items = filtered.filter(t => t.status === col.id);
-                    return (
-                      <div
-                        key={col.id}
-                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          const taskId = e.dataTransfer.getData("text/plain");
-                          if (taskId) updateStatusWithUndo(taskId, col.id);
-                        }}
-                        style={{
-                          background: C.surface, border: `1px solid ${C.border}`,
-                          borderRadius: "10px", padding: "12px",
-                          display: "flex", flexDirection: "column", gap: "8px",
-                          minHeight: "200px",
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
-                          <span style={{ fontSize: "10px", padding: "2px 9px", borderRadius: "20px", background: col.faint, color: col.color, fontWeight: "600", letterSpacing: "0.07em", textTransform: "uppercase" }}>
-                            {col.label}
-                          </span>
-                          <span style={{ fontSize: "10px", color: C.muted, fontWeight: "600" }}>{items.length}</span>
-                        </div>
-                        {items.length === 0 ? (
-                          <div style={{ fontSize: "10px", color: C.muted, fontStyle: "italic", textAlign: "center", padding: "12px 0" }}>—</div>
-                        ) : items.map(t => {
-                          const cl = clientById[t.client];
-                          return (
-                            <div
-                              key={t.id}
-                              draggable
-                              onDragStart={(e) => { e.dataTransfer.setData("text/plain", t.id); e.dataTransfer.effectAllowed = "move"; }}
-                              style={{
-                                background: C.bg, border: `1px solid ${C.border}`,
-                                borderLeft: `3px solid ${cl.color}`,
-                                borderRadius: "6px", padding: "8px 10px",
-                                cursor: "grab", userSelect: "none",
-                                display: "flex", alignItems: "flex-start", gap: "8px",
-                              }}
-                            >
-                              {t.status !== "done" && (
-                                <div
-                                  onClick={(e) => { e.stopPropagation(); updateStatusWithUndo(t.id, "done"); }}
-                                  title="Marquer comme livré"
-                                  className="task-check"
-                                  style={{
-                                    width: "16px", height: "16px", borderRadius: "4px",
-                                    border: `1.5px solid ${cl.color}55`,
-                                    background: C.surface, flexShrink: 0,
-                                    cursor: "pointer", marginTop: "1px",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    transition: "border-color 0.12s, background 0.12s",
-                                  }}
-                                />
-                              )}
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
-                                  {t.priority === "urgent" && (
-                                    <span style={{ fontSize: "8px", padding: "1px 5px", borderRadius: "3px", background: C.redFaint, color: C.red, fontWeight: "700" }}>!</span>
-                                  )}
-                                  <span style={{ fontSize: "11px", fontWeight: "600", color: C.navy, lineHeight: "1.3" }}>{t.title}</span>
-                                </div>
-                                <div style={{ fontSize: "9px", color: C.muted }}>
-                                  {cl.name}
-                                  {t.due && <span style={{ color: isOverdue(t.due) ? C.red : C.muted, marginLeft: "5px" }}>· {fmtDate(t.due)}</span>}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
                 </div>
               );
             })()}
@@ -1269,144 +1100,6 @@ export default function App() {
               </div>
             )}
 
-            {/* ── TIMELINE ── */}
-            {view === "timeline" && (
-              <div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "10px", marginBottom: "18px" }}>
-                  {days.map(day => {
-                    const isToday = day.toDateString() === TODAY.toDateString();
-                    const dayTasks = tasks.filter(t => t.due && new Date(t.due).toDateString() === day.toDateString());
-                    return (
-                      <div
-                        key={day.toISOString()}
-                        style={{
-                          background: isToday ? C.navyFaint : C.surface,
-                          border: `1px solid ${isToday ? C.navy + "28" : C.border}`,
-                          borderRadius: "10px", padding: "12px 10px", minHeight: "180px",
-                        }}
-                      >
-                        <div style={{ textAlign: "center", marginBottom: "12px" }}>
-                          <div style={{ fontSize: "8px", textTransform: "uppercase", letterSpacing: "0.12em", color: isToday ? C.blue : C.muted, fontWeight: "600" }}>
-                            {day.toLocaleDateString("fr-FR", { weekday: "short" })}
-                          </div>
-                          <div style={{ fontFamily: C.serif, fontSize: "24px", fontWeight: "700", color: isToday ? C.blue : C.navy, lineHeight: 1.1 }}>
-                            {day.getDate()}
-                          </div>
-                          <div style={{ fontSize: "9px", color: C.muted }}>{day.toLocaleDateString("fr-FR", { month: "short" })}</div>
-                          {isToday && <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: C.blue, margin: "4px auto 0" }} />}
-                        </div>
-                        {dayTasks.length === 0
-                          ? <div style={{ textAlign: "center", fontSize: "18px", color: C.borderSoft, marginTop: "10px" }}>·</div>
-                          : dayTasks.map(task => {
-                            const cl = clientById[task.client];
-                            return (
-                              <div key={task.id} style={{
-                                background: C.surface, border: `1px solid ${C.border}`,
-                                borderRadius: "6px", padding: "6px 8px", marginBottom: "5px",
-                                borderLeft: `3px solid ${cl.color}`,
-                              }}>
-                                <div style={{ fontSize: "10px", fontWeight: "600", color: C.navy, lineHeight: "1.3", marginBottom: "3px" }}>{task.title}</div>
-                                <div style={{ fontSize: "9px", color: C.muted }}>{cl.name}</div>
-                                <div style={{ marginTop: "4px" }}><StatusBadge status={task.status} small /></div>
-                              </div>
-                            );
-                          })
-                        }
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Tasks without date */}
-                {tasks.filter(t => !t.due && t.status !== "done").length > 0 && (
-                  <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "16px 18px" }}>
-                    <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "12px" }}>
-                      Sans date assignée
-                    </div>
-                    {tasks.filter(t => !t.due && t.status !== "done").map(task => {
-                      const cl = clientById[task.client];
-                      return (
-                        <div key={task.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 0", borderBottom: `1px solid ${C.borderSoft}` }}>
-                          <ClientDot id={task.client} />
-                          <span style={{ fontSize: "12px", color: C.navy, flex: 1 }}>{task.title}</span>
-                          <span style={{ fontSize: "10px", color: C.muted }}>{cl.name}</span>
-                          <StatusBadge status={task.status} small />
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── ARCHIVE ── */}
-            {view === "archive" && (
-              <div>
-                {doneTasks.length === 0 ? (
-                  <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "40px 20px", textAlign: "center" }}>
-                    <div style={{ fontSize: "13px", color: C.muted }}>Aucune tâche archivée pour le moment.</div>
-                    <div style={{ fontSize: "11px", color: C.muted, marginTop: "6px" }}>Marque une tâche comme « Livré » pour la voir apparaître ici.</div>
-                  </div>
-                ) : (
-                  (() => {
-                    const sorted = [...doneTasks].sort((a, b) => {
-                      const da = a.doneAt || a.due || "0";
-                      const db = b.doneAt || b.due || "0";
-                      return db.localeCompare(da);
-                    });
-                    const groups = {};
-                    sorted.forEach(t => {
-                      const key = ymKey(t.doneAt || t.due) || "sans-date";
-                      (groups[key] = groups[key] || []).push(t);
-                    });
-                    const keys = Object.keys(groups).sort((a, b) => b.localeCompare(a));
-                    return keys.map(k => (
-                      <div key={k} style={{ marginBottom: "26px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "11px" }}>
-                          <span style={{ fontSize: "11px", fontWeight: "600", color: C.navy, textTransform: "capitalize" }}>
-                            {k === "sans-date" ? "Sans date" : fmtMonth(k)}
-                          </span>
-                          <div style={{ flex: 1, height: "1px", background: C.borderSoft }} />
-                          <span style={{ fontSize: "10px", color: C.muted }}>{groups[k].length}</span>
-                        </div>
-                        {groups[k].map(task => {
-                          const cl = clientById[task.client];
-                          return (
-                            <div key={task.id} className="hover-bg" style={{
-                              background: C.surface, border: `1px solid ${C.border}`,
-                              borderRadius: "8px", borderLeft: `3px solid ${cl.color}`,
-                              padding: "10px 16px", marginBottom: "5px",
-                              display: "flex", alignItems: "center", gap: "12px",
-                            }}>
-                              <span style={{ fontSize: "11px", color: C.green, fontWeight: "700" }}>✓</span>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: "12px", fontWeight: "600", color: C.navy }}>{task.title}</div>
-                                <div style={{ fontSize: "10px", color: C.muted, marginTop: "2px" }}>
-                                  {cl.name} · {task.project}
-                                  {task.recurring === "monthly" && <span style={{ color: C.violet, marginLeft: "6px" }}>· ↻ mensuel</span>}
-                                </div>
-                              </div>
-                              <span style={{ fontSize: "10px", color: C.muted, whiteSpace: "nowrap" }}>
-                                {task.doneAt
-                                  ? `Livré ${new Date(task.doneAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`
-                                  : `Prévu ${fmtDate(task.due)}`}
-                              </span>
-                              <button
-                                onClick={() => updateStatus(task.id, "active")}
-                                style={{ fontSize: "9px", color: C.muted, background: "none", border: `1px solid ${C.border}`, borderRadius: "4px", padding: "3px 8px", cursor: "pointer" }}
-                              >
-                                Rouvrir
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ));
-                  })()
-                )}
-              </div>
-            )}
-
             {/* ── CALENDRIER (mensuel, drag & drop) ── */}
             {view === "calendrier" && (() => {
               const [yy, mm] = calendarMonth.split("-").map(Number);
@@ -1463,41 +1156,47 @@ export default function App() {
 
               return (
                 <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", gap: "12px" }}>
-                    <button onClick={() => shiftCalMonth(-1)} style={{ fontSize: "12px", padding: "6px 14px", borderRadius: "6px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer" }}>← Mois précédent</button>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <div style={{ fontFamily: C.serif, fontSize: "20px", fontWeight: "700", color: C.navy, textTransform: "capitalize" }}>{fmtMonth(calendarMonth)}</div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px", gap: "12px" }}>
+                    <button onClick={() => shiftCalMonth(-1)} className="hover-card" style={{ fontSize: "12px", padding: "8px 16px", borderRadius: "8px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer", fontWeight: "500" }}>← Mois précédent</button>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      <div style={{ fontFamily: C.serif, fontSize: "22px", fontWeight: "600", color: C.navy, textTransform: "capitalize", letterSpacing: "-0.01em" }}>{fmtMonth(calendarMonth)}</div>
                       <button
                         onClick={jumpToToday}
                         disabled={calendarMonth === todayKey}
                         style={{
-                          fontSize: "10px", padding: "4px 10px", borderRadius: "20px",
+                          fontSize: "10px", padding: "5px 12px", borderRadius: "20px",
                           border: `1px solid ${calendarMonth === todayKey ? C.borderSoft : C.navy}`,
                           background: calendarMonth === todayKey ? "transparent" : C.navyFaint,
                           color: calendarMonth === todayKey ? C.muted : C.navy,
                           cursor: calendarMonth === todayKey ? "default" : "pointer",
                           fontWeight: "600", letterSpacing: "0.04em",
+                          transition: "all 0.15s",
                         }}
                       >
                         Aujourd'hui
                       </button>
                     </div>
-                    <button onClick={() => shiftCalMonth(1)} style={{ fontSize: "12px", padding: "6px 14px", borderRadius: "6px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer" }}>Mois suivant →</button>
+                    <button onClick={() => shiftCalMonth(1)} className="hover-card" style={{ fontSize: "12px", padding: "8px 16px", borderRadius: "8px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer", fontWeight: "500" }}>Mois suivant →</button>
                   </div>
 
-                  <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "12px" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px", marginBottom: "8px" }}>
-                      {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map(d => (
-                        <div key={d} style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, fontWeight: "600", textAlign: "center", padding: "4px 0" }}>{d}</div>
+                  <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "12px", padding: "16px", boxShadow: C.shadow }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px", marginBottom: "10px" }}>
+                      {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((d, i) => (
+                        <div key={d} style={{ fontSize: "10px", letterSpacing: "0.14em", textTransform: "uppercase", color: i >= 5 ? C.muted : C.navy, fontWeight: "600", textAlign: "center", padding: "6px 0" }}>{d}</div>
                       ))}
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px" }}>
                       {cells.map((cell, i) => {
-                        if (!cell) return <div key={i} style={{ minHeight: "100px" }} />;
-                        const cellStr = `${cell.getFullYear()}-${String(cell.getMonth() + 1).padStart(2, "0")}-${String(cell.getDate()).padStart(2, "0")}`;
+                        const colIdx = i % 7;
+                        const isWeekend = colIdx >= 5;
+                        if (!cell) return <div key={i} className="cal-cell empty" style={{ minHeight: "108px", background: "transparent" }} />;
+                        const cellStr = toLocalISO(cell);
                         const dayTasks = calendarTasks.filter(t => t.due === cellStr);
                         const isToday = cellStr === todayISO();
+                        const isPast = cellStr < todayISO();
                         const isOver = dragOverDate === cellStr;
+                        const overflow = dayTasks.length > 4 ? dayTasks.length - 4 : 0;
+                        const visibleTasks = overflow > 0 ? dayTasks.slice(0, 4) : dayTasks;
                         return (
                           <div
                             key={i}
@@ -1505,16 +1204,34 @@ export default function App() {
                             onDragOver={(e) => onDragOverCell(e, cellStr)}
                             onDrop={(e) => onDropCell(e, cellStr)}
                             style={{
-                              background: isOver ? C.blueFaint : isToday ? C.navyFaint : C.bg,
-                              border: `1px solid ${isOver ? C.blue : isToday ? C.navy + "28" : C.borderSoft}`,
-                              borderRadius: "8px", padding: "6px", minHeight: "100px",
+                              background: isOver ? C.blueFaint : isToday ? C.navyFaint : isWeekend ? C.bg : C.surface,
+                              border: `1px solid ${isOver ? C.blue : isToday ? C.navy + "44" : C.borderSoft}`,
+                              borderRadius: "8px", padding: "6px 7px", minHeight: "108px",
                               display: "flex", flexDirection: "column", gap: "3px",
-                              transition: "background 0.1s, border-color 0.1s",
                               position: "relative",
+                              opacity: isPast && !isToday ? 0.7 : 1,
+                              minWidth: 0, overflow: "hidden",
                             }}
                           >
-                            <div style={{ fontSize: "11px", fontWeight: "700", color: isToday ? C.blue : C.navy, marginBottom: "3px" }}>{cell.getDate()}</div>
-                            {dayTasks.map(t => (
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                                <span style={{ fontSize: "12px", fontWeight: isToday ? "700" : "500", color: isToday ? C.blue : isWeekend ? C.muted : C.navy }}>{cell.getDate()}</span>
+                                {isToday && <span style={{ width: "4px", height: "4px", borderRadius: "50%", background: C.blue }} />}
+                              </div>
+                              <button
+                                onClick={() => quickAddOnDate(cellStr)}
+                                title="Ajouter une tâche ce jour"
+                                style={{
+                                  opacity: 0, fontSize: "11px", lineHeight: 1,
+                                  width: "16px", height: "16px", borderRadius: "4px",
+                                  border: "none", background: C.borderSoft, color: C.muted,
+                                  cursor: "pointer", padding: 0,
+                                  transition: "opacity 0.12s, background 0.12s, color 0.12s",
+                                }}
+                                className="cell-add-btn"
+                              >+</button>
+                            </div>
+                            {visibleTasks.map(t => (
                               <TaskChip
                                 key={t.id}
                                 task={t}
@@ -1523,6 +1240,9 @@ export default function App() {
                                 onDragEnd={onDragEnd}
                               />
                             ))}
+                            {overflow > 0 && (
+                              <div style={{ fontSize: "9px", color: C.muted, fontWeight: "500", paddingLeft: "4px", marginTop: "2px" }}>+ {overflow} de plus</div>
+                            )}
                           </div>
                         );
                       })}
@@ -1540,16 +1260,16 @@ export default function App() {
                       setDragOverDate(null);
                     }}
                     style={{
-                      marginTop: "16px", background: C.surface,
-                      border: `1px dashed ${C.border}`, borderRadius: "10px",
-                      padding: "14px 16px",
+                      marginTop: "20px", background: C.surface,
+                      border: `1px dashed ${C.border}`, borderRadius: "12px",
+                      padding: "16px 18px",
                     }}
                   >
-                    <div style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: "10px" }}>
-                      Sans date assignée — {undated.length} tâche{undated.length !== 1 ? "s" : ""} (glisse-en une vers un jour, ou glisse une tâche datée ici pour retirer sa date)
+                    <div style={{ fontSize: "10px", letterSpacing: "0.14em", textTransform: "uppercase", color: C.muted, marginBottom: "12px", fontWeight: "500" }}>
+                      Sans date — {undated.length} tâche{undated.length !== 1 ? "s" : ""} <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: "400", marginLeft: "6px", color: C.muted, fontSize: "10px" }}>(glisse vers un jour, ou dépose ici pour retirer la date)</span>
                     </div>
                     {undated.length > 0 ? (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                         {undated.map(t => (
                           <TaskChip
                             key={t.id}
@@ -1565,7 +1285,7 @@ export default function App() {
                     )}
                   </div>
 
-                  <div style={{ marginTop: "10px", fontSize: "11px", color: C.muted, textAlign: "center" }}>
+                  <div style={{ marginTop: "12px", fontSize: "11px", color: C.muted, textAlign: "center" }}>
                     {calendarTasks.length - undated.length} tâche{calendarTasks.length - undated.length !== 1 ? "s" : ""} planifiée{calendarTasks.length - undated.length !== 1 ? "s" : ""}
                     {filter !== "all" && ` · filtre client : ${clientById[filter]?.name}`}
                   </div>
@@ -1595,42 +1315,48 @@ export default function App() {
 
               return (
                 <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
-                    <button onClick={() => shiftMonth(-1)} style={{ fontSize: "12px", padding: "6px 14px", borderRadius: "6px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer" }}>← Mois précédent</button>
-                    <div style={{ fontFamily: C.serif, fontSize: "20px", fontWeight: "700", color: C.navy, textTransform: "capitalize" }}>{fmtMonth(historyMonth)}</div>
-                    <button onClick={() => shiftMonth(1)} style={{ fontSize: "12px", padding: "6px 14px", borderRadius: "6px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer" }}>Mois suivant →</button>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
+                    <button onClick={() => shiftMonth(-1)} className="hover-card" style={{ fontSize: "12px", padding: "8px 16px", borderRadius: "8px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer", fontWeight: "500" }}>← Mois précédent</button>
+                    <div style={{ fontFamily: C.serif, fontSize: "22px", fontWeight: "600", color: C.navy, textTransform: "capitalize", letterSpacing: "-0.01em" }}>{fmtMonth(historyMonth)}</div>
+                    <button onClick={() => shiftMonth(1)} className="hover-card" style={{ fontSize: "12px", padding: "8px 16px", borderRadius: "8px", border: `1px solid ${C.border}`, background: C.surface, color: C.navy, cursor: "pointer", fontWeight: "500" }}>Mois suivant →</button>
                   </div>
 
-                  <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "10px", padding: "12px" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px", marginBottom: "8px" }}>
-                      {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map(d => (
-                        <div key={d} style={{ fontSize: "9px", letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, fontWeight: "600", textAlign: "center", padding: "4px 0" }}>{d}</div>
+                  <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: "12px", padding: "16px", boxShadow: C.shadow }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px", marginBottom: "10px" }}>
+                      {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((d, i) => (
+                        <div key={d} style={{ fontSize: "10px", letterSpacing: "0.14em", textTransform: "uppercase", color: i >= 5 ? C.muted : C.navy, fontWeight: "600", textAlign: "center", padding: "6px 0" }}>{d}</div>
                       ))}
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "6px" }}>
                       {cells.map((cell, i) => {
-                        if (!cell) return <div key={i} style={{ minHeight: "90px" }} />;
-                        const cellStr = `${cell.getFullYear()}-${String(cell.getMonth() + 1).padStart(2, "0")}-${String(cell.getDate()).padStart(2, "0")}`;
+                        const colIdx = i % 7;
+                        const isWeekend = colIdx >= 5;
+                        if (!cell) return <div key={i} style={{ minHeight: "92px", background: "transparent" }} />;
+                        const cellStr = toLocalISO(cell);
                         const dayTasks = doneTasks.filter(t => t.doneAt === cellStr && (filter === "all" || t.client === filter));
                         const isToday = cellStr === todayISO();
                         return (
                           <div key={i} style={{
-                            background: isToday ? C.navyFaint : C.bg,
-                            border: `1px solid ${isToday ? C.navy + "28" : C.borderSoft}`,
-                            borderRadius: "8px", padding: "6px", minHeight: "90px",
+                            background: isToday ? C.navyFaint : isWeekend ? C.bg : C.surface,
+                            border: `1px solid ${isToday ? C.navy + "44" : C.borderSoft}`,
+                            borderRadius: "8px", padding: "6px 7px", minHeight: "92px",
                             display: "flex", flexDirection: "column", gap: "3px",
+                            minWidth: 0, overflow: "hidden",
                           }}>
-                            <div style={{ fontSize: "11px", fontWeight: "700", color: isToday ? C.blue : C.navy, marginBottom: "3px" }}>{cell.getDate()}</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "4px", marginBottom: "3px" }}>
+                              <span style={{ fontSize: "12px", fontWeight: isToday ? "700" : "500", color: isToday ? C.blue : isWeekend ? C.muted : C.navy }}>{cell.getDate()}</span>
+                              {isToday && <span style={{ width: "4px", height: "4px", borderRadius: "50%", background: C.blue }} />}
+                            </div>
                             {dayTasks.map(t => {
                               const cl = clientById[t.client];
                               return (
                                 <div key={t.id} title={t.title} style={{
-                                  fontSize: "9px", padding: "3px 5px", borderRadius: "3px",
-                                  background: C.surface, borderLeft: `2px solid ${cl.color}`,
+                                  fontSize: "9px", padding: "3px 6px", borderRadius: "3px",
+                                  background: C.greenFaint + "60", borderLeft: `2px solid ${cl.color}`,
                                   color: C.navy, lineHeight: "1.3",
                                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                                 }}>
-                                  {t.title}
+                                  ✓ {t.title}
                                 </div>
                               );
                             })}
@@ -1882,7 +1608,7 @@ export default function App() {
                     onClick={() => {
                       setSearchOpen(false);
                       setSearchQuery("");
-                      setView("missions");
+                      setView("aujourd-hui");
                       setExpanded(t.id);
                     }}
                     style={{

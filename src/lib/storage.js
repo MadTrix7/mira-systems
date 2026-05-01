@@ -13,9 +13,8 @@ const KEYS = {
 // ── Preferences (theme, density, view, etc.) ─────────────────────────────────
 
 const DEFAULT_PREFS = {
-  theme: "light",        // "light" | "dark"
-  density: "comfy",      // "comfy" | "compact"
-  groupByProject: false, // missions view
+  theme: "light",         // "light" | "dark"
+  density: "comfy",       // "comfy" | "compact"
   sidebarCollapsed: true, // mobile-hidden by default; CSS media query controls desktop
 };
 
@@ -76,7 +75,9 @@ export function loadTasks(fallback, validClientIds = null) {
 // ── Rituals — reset automatique à minuit ─────────────────────────────────────
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10); // "2026-04-24"
+  // Local YYYY-MM-DD (toISOString gives UTC, which shifts day for non-UTC timezones)
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 export function saveRitualsDone(ids) {
