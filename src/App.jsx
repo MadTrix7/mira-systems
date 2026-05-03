@@ -181,13 +181,14 @@ function StatusBadge({ status, small }) {
   );
 }
 
-function TaskChip({ task, isDragging, onDragStart, onDragEnd }) {
+function TaskChip({ task, isDragging, onDragStart, onDragEnd, onClick }) {
   const cl = clientById[task.client];
   return (
     <div
       draggable
       onDragStart={(e) => onDragStart(e, task.id)}
       onDragEnd={onDragEnd}
+      onClick={onClick}
       title={`${task.title} — ${cl.name}${task.project ? " · " + task.project : ""}`}
       style={{
         fontSize: "9px", padding: "3px 6px", borderRadius: "3px",
@@ -195,7 +196,7 @@ function TaskChip({ task, isDragging, onDragStart, onDragEnd }) {
         borderLeft: `2px solid ${cl.color}`,
         color: C.navy, lineHeight: "1.3",
         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        cursor: "grab", opacity: isDragging ? 0.4 : 1,
+        cursor: onClick ? "pointer" : "grab", opacity: isDragging ? 0.4 : 1,
         userSelect: "none",
         minWidth: 0, maxWidth: "100%",
       }}
@@ -451,6 +452,7 @@ export default function App() {
   const [showModal, setShowModal] = useState(false);
   const [historyMonth, setHistoryMonth] = useState(ymKey(todayISO()));
   const [calendarMonth, setCalendarMonth] = useState(ymKey(todayISO()));
+  const [selectedCalDay, setSelectedCalDay] = useState(null);
   const [draggingId, setDraggingId] = useState(null);
   const [dragOverDate, setDragOverDate] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -482,6 +484,7 @@ export default function App() {
         if (searchOpen) setSearchOpen(false);
         if (showModal) setShowModal(false);
         if (expanded) setExpanded(null);
+        if (selectedCalDay) setSelectedCalDay(null);
         return;
       }
       // g h / g k / g a → navigate
@@ -489,7 +492,7 @@ export default function App() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [searchOpen, showModal, expanded]);
+  }, [searchOpen, showModal, expanded, selectedCalDay]);
 
   // Quick-add state
   const [newTitle, setNewTitle] = useState("");
@@ -1197,20 +1200,23 @@ export default function App() {
                         const isOver = dragOverDate === cellStr;
                         const overflow = dayTasks.length > 4 ? dayTasks.length - 4 : 0;
                         const visibleTasks = overflow > 0 ? dayTasks.slice(0, 4) : dayTasks;
+                        const isSelected = selectedCalDay === cellStr;
                         return (
                           <div
                             key={i}
                             className="cal-cell"
                             onDragOver={(e) => onDragOverCell(e, cellStr)}
                             onDrop={(e) => onDropCell(e, cellStr)}
+                            onClick={() => setSelectedCalDay(cellStr)}
                             style={{
-                              background: isOver ? C.blueFaint : isToday ? C.navyFaint : isWeekend ? C.bg : C.surface,
-                              border: `1px solid ${isOver ? C.blue : isToday ? C.navy + "44" : C.borderSoft}`,
+                              background: isOver ? C.blueFaint : isSelected ? C.violetFaint : isToday ? C.navyFaint : isWeekend ? C.bg : C.surface,
+                              border: `1px solid ${isOver ? C.blue : isSelected ? C.violet : isToday ? C.navy + "44" : C.borderSoft}`,
                               borderRadius: "8px", padding: "6px 7px", minHeight: "108px",
                               display: "flex", flexDirection: "column", gap: "3px",
                               position: "relative",
                               opacity: isPast && !isToday ? 0.7 : 1,
                               minWidth: 0, overflow: "hidden",
+                              cursor: "pointer",
                             }}
                           >
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
@@ -1219,7 +1225,7 @@ export default function App() {
                                 {isToday && <span style={{ width: "4px", height: "4px", borderRadius: "50%", background: C.blue }} />}
                               </div>
                               <button
-                                onClick={() => quickAddOnDate(cellStr)}
+                                onClick={(e) => { e.stopPropagation(); quickAddOnDate(cellStr); }}
                                 title="Ajouter une tâche ce jour"
                                 style={{
                                   opacity: 0, fontSize: "11px", lineHeight: 1,
@@ -1238,6 +1244,11 @@ export default function App() {
                                 isDragging={draggingId === t.id}
                                 onDragStart={onDragStart}
                                 onDragEnd={onDragEnd}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedCalDay(cellStr);
+                                  setExpanded(t.id);
+                                }}
                               />
                             ))}
                             {overflow > 0 && (
@@ -1376,6 +1387,98 @@ export default function App() {
           </main>
         </div>
       </div>
+
+      {/* ── DAY DETAIL MODAL (calendar day click) ──────────────────── */}
+      {selectedCalDay && (() => {
+        const dayTasks = tasks.filter(t =>
+          t.status !== "done"
+          && t.due === selectedCalDay
+          && (filter === "all" || t.client === filter)
+        );
+        const headerDate = (() => {
+          const [yy, mm, dd] = selectedCalDay.split("-").map(Number);
+          const d = new Date(yy, mm - 1, dd);
+          return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+        })();
+        return (
+          <div
+            onClick={e => { if (e.target === e.currentTarget) { setSelectedCalDay(null); setExpanded(null); } }}
+            style={{
+              position: "fixed", inset: 0,
+              background: "rgba(26,26,46,0.38)", backdropFilter: "blur(5px)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              zIndex: 200, padding: "20px",
+            }}
+          >
+            <div style={{
+              background: C.surface, borderRadius: "14px",
+              border: `1px solid ${C.border}`,
+              width: "100%", maxWidth: "640px",
+              maxHeight: "85vh", overflowY: "auto",
+              boxShadow: "0 24px 64px rgba(26,26,46,0.18)",
+            }}>
+              <div style={{
+                padding: "18px 22px 16px",
+                borderBottom: `1px solid ${C.borderSoft}`,
+                display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+                position: "sticky", top: 0, background: C.surface, zIndex: 1,
+              }}>
+                <div>
+                  <div style={{ fontSize: "10px", letterSpacing: "0.14em", textTransform: "uppercase", color: C.violet, fontWeight: "600", marginBottom: "4px" }}>Tâches du jour</div>
+                  <div style={{ fontFamily: C.serif, fontSize: "20px", fontWeight: "700", color: C.navy, textTransform: "capitalize", letterSpacing: "-0.01em" }}>{headerDate}</div>
+                  <div style={{ fontSize: "11px", color: C.muted, marginTop: "4px" }}>
+                    {dayTasks.length} tâche{dayTasks.length !== 1 ? "s" : ""}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={() => { setSelectedCalDay(null); setExpanded(null); quickAddOnDate(selectedCalDay); }}
+                    style={{
+                      fontSize: "11px", padding: "7px 14px", borderRadius: "6px",
+                      border: `1px solid ${C.violet}`, background: C.violetFaint,
+                      color: C.violet, cursor: "pointer", fontWeight: "600",
+                    }}
+                  >+ Tâche</button>
+                  <button
+                    onClick={() => { setSelectedCalDay(null); setExpanded(null); }}
+                    title="Fermer (Esc)"
+                    style={{
+                      fontSize: "11px", padding: "7px 14px", borderRadius: "6px",
+                      border: `1px solid ${C.border}`, background: C.surface,
+                      color: C.muted, cursor: "pointer", fontWeight: "500",
+                    }}
+                  >Fermer</button>
+                </div>
+              </div>
+              <div style={{ padding: "18px 22px" }}>
+                {dayTasks.length === 0 ? (
+                  <div style={{ fontSize: "13px", color: C.muted, fontStyle: "italic", padding: "20px 0", textAlign: "center" }}>
+                    Aucune tâche pour ce jour.
+                  </div>
+                ) : (
+                  dayTasks.map(task => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      expanded={expanded === task.id}
+                      onToggle={() => setExpanded(expanded === task.id ? null : task.id)}
+                      onStatusChange={(s) => updateStatusWithUndo(task.id, s)}
+                      onToggleRecurring={() => updateRecurring(task.id)}
+                      onChangeDue={(d) => updateDue(task.id, d)}
+                      onChangeTitle={(t) => updateTitle(task.id, t)}
+                      onChangeNotes={(n) => updateNotes(task.id, n)}
+                      onToggleStep={(i) => toggleStep(task.id, i)}
+                      onCheck={() => updateStatusWithUndo(task.id, "done")}
+                      onDelete={() => deleteTask(task.id)}
+                      density={prefs.density}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── QUICK ADD MODAL ──────────────────────────────────────── */}
       {showModal && (
